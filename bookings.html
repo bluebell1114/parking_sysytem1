@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Захиалгууд</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+<div class="layout">
+
+  
+  <div class="sidebar">
+    <h2>🌿 GreenPark</h2>
+    <a href="dashboard.html">📊 Хянах самбар</a>
+    <a href="parking.html">📍 Зогсоол</a>
+    <a href="bookings.html">📅 Захиалгууд</a>
+    <a onclick="logout()">🚪 Гарах</a>
+  </div>
+
+
+  <div class="main">
+    <h1>Захиалгууд</h1>
+    <p>Бүх захиалгыг хянах</p>
+
+    <table>
+      <tr>
+        <th>ID</th>
+        <th>Хэрэглэгч</th>
+        <th>Дүн</th>
+        <th>Төлөв</th>
+      </tr>
+      <tbody id="bookingTable"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
