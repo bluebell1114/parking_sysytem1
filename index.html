@@ -4,36 +4,34 @@
 <meta charset="UTF-8">
 <title>GreenPark Admin</title>
 <link rel="stylesheet" href="css/style.css">
-
-<!-- Google Font -->
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
 </head>
 
 <body class="login-body">
-
-<div class="bg-animated"></div>
 
 <div class="login-container">
   <h1>🌿 GreenPark</h1>
   <p>Ухаалаг зогсоолын систем</p>
 
   <div class="login-card">
-
     <h2>Нэвтрэх</h2>
 
     <input type="email" id="email" placeholder="Имэйл">
     <input type="password" id="password" placeholder="Нууц үг">
 
-    <button onclick="login()">Нэвтрэх</button>
+    <button id="loginBtn">Нэвтрэх</button>
 
     <div class="demo">
       admin@greenpark.com / admin123
     </div>
-
   </div>
 </div>
 
+<!-- JS -->
 <script src="js/app.js"></script>
+
+<script>
+document.getElementById("loginBtn").addEventListener("click", login);
+</script>
 
 </body>
 </html>

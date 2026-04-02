@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Зогсоол</title>
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="UTF-8">
+<title>Зогсоол</title>
+<link rel="stylesheet" href="css/style.css">
 </head>
 
-<body>
+<body class="admin">
 
 <div class="layout">
 
@@ -15,58 +15,58 @@
     <h2>🌿 GreenPark</h2>
     <a href="dashboard.html">📊 Хянах самбар</a>
     <a href="parking.html">📍 Зогсоол</a>
-    <a href="bookings.html">📅 Захиалгууд</a>
+    <a href="users.html">👤 Хэрэглэгчид</a>
     <a onclick="logout()">🚪 Гарах</a>
   </div>
 
   <!-- MAIN -->
   <div class="main">
 
-    <h1>Зогсоолууд</h1>
-    <p>Зогсоолын мэдээллийг удирдах</p>
+    <div class="header">
+      <h1>Зогсоолын хэсэг</h1>
+      <button class="primary" onclick="openModal()">+ Зогсоол нэмэх</button>
+    </div>
 
-    <button class="btn" onclick="openModal()">+ Шинэ зогсоол нэмэх</button>
-
+    <!-- TABLE -->
     <table>
-      <tr>
-        <th>Нэр</th>
-        <th>Үнэ (цаг)</th>
-        <th>Нийт</th>
-        <th>Үйлдэл</th>
-      </tr>
+      <thead>
+        <tr>
+          <th>Нэр</th>
+          <th>Бүс</th>
+          <th>Үнэ</th>
+          <th>Хаяг</th>
+          <th>Нийт багтаамж</th>
+          <th>Үйлдэл</th>
+        </tr>
+      </thead>
+
       <tbody id="parkingTable"></tbody>
     </table>
 
   </div>
-
 </div>
 
 <!-- MODAL -->
 <div id="modal" class="modal">
   <div class="modal-content">
 
-    <div class="modal-header">
-      <h2>Шинэ зогсоол нэмэх</h2>
-      <span onclick="closeModal()">✖</span>
-    </div>
+    <h2>Зогсоол нэмэх / засах</h2>
 
-    <p class="subtitle">Мэдээллээ бөглөнө үү</p>
+    <input id="name" placeholder="Жишээ: A-101">
+    
+    <select id="zone">
+      <option value="A">A бүс</option>
+      <option value="B">B бүс</option>
+      <option value="C">C бүс</option>
+    </select>
 
-    <div class="form-row">
-      <input id="name" placeholder="Нэр">
-      <input id="price" placeholder="Үнэ (цаг)">
-    </div>
-
-    <input id="address" placeholder="Хаяг">
-
-    <div class="form-row">
-      <input id="total" placeholder="Нийт зогсоол">
-      <input id="available" placeholder="Сул зогсоол">
-    </div>
+    <input id="price" placeholder="Үнэ">
+    <input id="total" placeholder="Нийт зогсоол">
+    <input id="address" placeholder="Хаяг (жишээ: СБД, 1-р хороо)">
 
     <div class="modal-actions">
-      <button onclick="createSpot()">Үүсгэх</button>
-      <button class="cancel" onclick="closeModal()">Цуцлах</button>
+      <button onclick="createSpot()">Хадгалах</button>
+      <button onclick="closeModal()">Цуцлах</button>
     </div>
 
   </div>
