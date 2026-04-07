@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Map</title>
+  <script src="https://maps.googleapis.com/maps/api/js?key=API_KEY"></script>
+</head>
+
+<body>
+<div id="map" style="height:100vh"></div>
+
+<script type="module">
+import { db } from "./js/firebase.js";
+import { addDoc, collection } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+
+const map = new google.maps.Map(document.getElementById("map"), {
+  center: { lat: 47.91, lng: 106.91 },
+  zoom: 13
+});
+
+map.addListener("click", async (e) => {
+  await addDoc(collection(db, "parking_spots"), {
+    name: "Map Spot",
+    lat: e.latLng.lat(),
+    lng: e.latLng.lng(),
+    price: 1000,
+    total: 10,
+    available: 10
+  });
+
+  alert("Map дээр нэмэгдлээ");
+});
+
+</script>
+</body>
+</html>

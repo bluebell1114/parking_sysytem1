@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Хэрэглэгчид</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <h2>🌿 GreenPark</h2>
+    <a href="dashboard.html">📊 Хянах самбар</a>
+    <a href="parking.html">📍 Зогсоол</a>
+    <a href="bookings.html">📅 Захиалгууд</a>
+    <a href="users.html">👤 Хэрэглэгчид</a>
+    <a onclick="logout()">🚪 Гарах</a>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <h1>Хэрэглэгчид</h1>
+    <p>Хэрэглэгчийн мэдээлэл удирдах</p>
+
+    <button onclick="openUserModal()">+ Хэрэглэгч нэмэх</button>
+
+    <table>
+      <tr>
+        <th>Нэр</th>
+        <th>Имэйл</th>
+        <th>Утас</th>
+        <th>Үйлдэл</th>
+      </tr>
+      <tbody id="userTable"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- MODAL -->
+<div id="userModal" class="modal">
+  <div class="modal-content">
+    <h2>Хэрэглэгч нэмэх / засах</h2>
+
+    <input id="u_name" placeholder="Нэр">
+    <input id="u_email" placeholder="Имэйл">
+    <input id="u_phone" placeholder="Утас">
+
+    <button onclick="saveUser()">Хадгалах</button>
+    <button onclick="closeUserModal()">Цуцлах</button>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
