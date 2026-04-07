@@ -1,0 +1,92 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class GoogleMapPage extends StatefulWidget {
+  const GoogleMapPage({super.key});
+
+  @override
+  State<GoogleMapPage> createState() => _GoogleMapPageState();
+}
+
+class _GoogleMapPageState extends State<GoogleMapPage> {
+  static const LatLng ub = LatLng(47.9210, 106.9186);
+
+  GoogleMapController? _map;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
+
+  Set<Marker> _markers = {};
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _sub = FirebaseFirestore.instance
+        .collection('parking_spots')
+        .snapshots()
+        .listen(
+      (snap) {
+        final next = <Marker>{};
+
+        for (final d in snap.docs) {
+          final data = d.data();
+          final name = (data['name'] ?? '-') as String;
+          final price = (data['pricePerHour'] ?? 0) as int;
+
+          final loc = (data['location'] ?? {}) as Map<String, dynamic>;
+          final lat = (loc['lat'] as num?)?.toDouble();
+          final lng = (loc['lng'] as num?)?.toDouble();
+          if (lat == null || lng == null) continue;
+
+          next.add(
+            Marker(
+              markerId: MarkerId(d.id),
+              position: LatLng(lat, lng),
+              infoWindow: InfoWindow(
+                title: name,
+                snippet: '$price₮/цаг',
+                onTap: () {
+                },
+              ),
+            ),
+          );
+        }
+
+        if (mounted) setState(() => _markers = next);
+      },
+      onError: (e) {
+        if (mounted) setState(() => _error = '$e');
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _map?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text("Google Map")),
+        body: Center(child: Text("Алдаа: $_error")),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text("Google Map")),
+      body: GoogleMap(
+        initialCameraPosition: const CameraPosition(target: ub, zoom: 12),
+        onMapCreated: (c) => _map = c,
+        markers: _markers,
+        myLocationEnabled: true,       
+        myLocationButtonEnabled: true,
+      ),
+    );
+  }
+}

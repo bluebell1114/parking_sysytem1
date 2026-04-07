@@ -1,0 +1,23 @@
+================================================================================
+"Backend" энд юу вэ?
+================================================================================
+Тусдаа Node/Java сервер байхгүй. Өгөгдөл Firebase Firestore дээр хадгалагдана —
+энэ нь таны "backend" (BaaS).
+
+Хэрэв вэб дээр хүснэгт хоосон, Console-д permission-denied гарвал:
+
+1) https://console.firebase.google.com → төсөл "parking-3922f"
+2) Firestore Database → Rules
+3) Энэ хавтас дахь firestore.rules файлыг хуулаад тэнд нааж → Publish
+
+4) Authentication → Settings → Authorized domains дээр "localhost" байгаа эсэхийг шалгана
+   (ихэнх тохиолдолд Firestore rules л гол асуудал.)
+
+5) Вэбийг заавал HTTP серверээр нээнэ (npx serve) — file:// дээр Firebase зарим үйлдэл ажиллахгүй.
+
+================================================================================
+Ирээдүйд аюулгүй болгох
+================================================================================
+Админыг Firebase Auth (имэйл/нууц үг)-аар нэвтрүүлж, Rules дээр:
+  allow read, write: if request.auth != null && request.auth.token.admin == true;
+гэх мэт нөхцөл тавина (Custom claims эсвэл admins коллекц).

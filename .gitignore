@@ -1,0 +1,21 @@
+# Flutter / Dart
+**/.dart_tool/
+**/build/
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/coverage/
+
+# Android (machine-local)
+**/android/local.properties
+**/android/**/.cxx/
+
+# IDE
+**/.idea/
+**/*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (if used for local serve)
+**/node_modules/

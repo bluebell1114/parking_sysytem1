@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="UTF-8">
+  <title>Хэрэглэгчид</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="layout">
+
+  <div class="sidebar">
+    <h2>🌿 GreenPark</h2>
+    <a href="dashboard.html">📊 Хянах самбар</a>
+    <a href="users.html">👤 Хэрэглэгчид</a>
+    <a href="parking.html">📍 Зогсоол</a>
+    <a href="bookings.html">📅 Захиалгууд</a>
+    <a onclick="logout()">🚪 Гарах</a>
+  </div>
+
+  <div class="main">
+    <h1>Мобайл аппын хэрэглэгчид</h1>
+    <p>Апп дээр бүртгүүлсэн бүх акаунт (Firestore <code>users</code>)</p>
+
+    <table>
+      <tr>
+        <th>Нэр</th>
+        <th>Имэйл</th>
+        <th>UID</th>
+        <th>Бүртгүүлсэн</th>
+      </tr>
+      <tbody id="usersTable"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

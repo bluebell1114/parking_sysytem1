@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Зогсоол</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <h2>🌿 GreenPark</h2>
+    <a href="dashboard.html">📊 Хянах самбар</a>
+    <a href="users.html">👤 Хэрэглэгчид</a>
+    <a href="parking.html">📍 Зогсоол</a>
+    <a href="bookings.html">📅 Захиалгууд</a>
+    <a onclick="logout()">🚪 Гарах</a>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <h1>Зогсоолууд</h1>
+    <p>Зогсоолын мэдээллийг удирдах</p>
+
+    <button class="btn" onclick="openModal()">+ Шинэ зогсоол нэмэх</button>
+
+    <table>
+      <tr>
+        <th>Нэр</th>
+        <th>Үнэ (цаг)</th>
+        <th>Нийт</th>
+        <th>Үйлдэл</th>
+      </tr>
+      <tbody id="parkingTable"></tbody>
+    </table>
+
+  </div>
+
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="modal">
+  <div class="modal-content">
+
+    <div class="modal-header">
+      <h2>Шинэ зогсоол нэмэх</h2>
+      <span onclick="closeModal()">✖</span>
+    </div>
+
+    <p class="subtitle">Мэдээллээ бөглөнө үү</p>
+
+    <div class="form-row">
+      <input id="name" placeholder="Нэр">
+      <input id="price" placeholder="Үнэ (цаг)">
+    </div>
+
+    <input id="address" placeholder="Хаяг">
+
+    <div class="form-row">
+      <input id="total" placeholder="Нийт зогсоол">
+      <input id="available" placeholder="Сул зогсоол">
+    </div>
+
+    <p class="subtitle" style="margin-top:8px;">Газрын зураг (мобайл) — өргөрөг, уртраг</p>
+    <div class="form-row">
+      <input id="lat" type="number" step="any" placeholder="Өргөрөг (ж: 47.918873)">
+      <input id="lng" type="number" step="any" placeholder="Уртраг (ж: 106.917701)">
+    </div>
+    <p class="subtitle" style="font-size:12px;opacity:0.8;">Хоосон бол УБ төвийн координат ашиглана.</p>
+
+    <div class="modal-actions">
+      <button onclick="createSpot()">Үүсгэх</button>
+      <button class="cancel" onclick="closeModal()">Цуцлах</button>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
