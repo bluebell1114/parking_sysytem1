@@ -3,13 +3,16 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:latlong2/latlong.dart' as ll;
 
-import 'admin_service.dart';
+import 'auth_prefs.dart';
+import 'api_config.dart';
+import 'backend_api.dart';
 
 class AppColors {
   static const primary = Color.fromRGBO(244, 245, 246, 1);
@@ -88,7 +91,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _index = 0;
+  /// Апп нээгдэхэд шууд Map таб дээр бууна.
+  int _index = 1;
 
   late final List<Widget> _pages = const [
     CarListPage(),
@@ -96,6 +100,34 @@ class _HomePageState extends State<HomePage> {
     PaymentScreen(),
     NotificationScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncLocationOnce());
+  }
+
+  /// Docker `mobile_bas2`: хэрэглэгчийн байршлыг `user_locations` хүснэгтэд бичнэ.
+  Future<void> _syncLocationOnce() async {
+    try {
+      final t = await AuthPrefs.getToken();
+      if (t == null || t.isEmpty) return;
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) {
+        p = await Geolocator.requestPermission();
+        if (p == LocationPermission.denied ||
+            p == LocationPermission.deniedForever) {
+          return;
+        }
+      }
+      final pos = await Geolocator.getCurrentPosition();
+      await BackendApi.postLocation(
+        lat: pos.latitude,
+        lng: pos.longitude,
+        accuracyM: pos.accuracy,
+      );
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -623,157 +655,106 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  static const LatLng ub = LatLng(47.918873, 106.917701);
-
-  GoogleMapController? mapController;
+  static const ll.LatLng ub = ll.LatLng(47.918873, 106.917701);
 
   bool showCard = false;
   String locationName = "";
   String cardSubtitle = "";
+  String? _selectedSpotId;
 
   final TextEditingController searchController = TextEditingController();
 
-  Set<Marker> _markers = {};
-
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _spotsSub;
-  bool _defaultSpotsSeedInFlight = false;
+  List<Marker> _markers = [];
+  List<Map<String, dynamic>> _spotRows = [];
+  Timer? _poll;
+  bool _loadingSpots = true;
+  String? _spotsError;
 
   @override
   void initState() {
     super.initState();
-    _spotsSub = FirebaseFirestore.instance
-        .collection('parking_spots')
-        .snapshots()
-        .listen(_onSpotsUpdate);
+    _refreshSpots();
+    _poll = Timer.periodic(const Duration(seconds: 4), (_) => _refreshSpots());
   }
 
-  /// `parking_spots` хоосон бол УБ орчмын жишээ зогсоолуудыг Firestore руу оруулна
-  /// (тогтмол doc ID — давхардахгүй). Rules `write` зөвшөөрсөн байх ёстой.
-  Future<void> _maybeSeedDefaultSpots() async {
-    if (_defaultSpotsSeedInFlight) return;
-    _defaultSpotsSeedInFlight = true;
+  /// Docker `mobile_bas2` API — `parking_spots`.
+  Future<void> _refreshSpots() async {
     try {
-      final col = FirebaseFirestore.instance.collection('parking_spots');
-      final check = await col.limit(1).get();
-      if (check.docs.isNotEmpty) return;
+      final rows = await BackendApi.fetchSpots();
+      if (!mounted) return;
+      final next = <Marker>[];
+      for (final data in rows) {
+        final id = data['id']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        final pos = _spotLatLng(data);
+        if (pos == null) continue;
 
-      final batch = FirebaseFirestore.instance.batch();
-      void addDemo(
-        String id,
-        String name,
-        double lat,
-        double lng,
-        int pricePerHour,
-        int total,
-      ) {
-        batch.set(col.doc(id), {
-          'name': name,
-          'lat': lat,
-          'lng': lng,
-          'location': GeoPoint(lat, lng),
-          'address': 'Улаанбаатар (жишээ зогсоол)',
-          'pricePerHour': pricePerHour,
-          'price': pricePerHour.toString(),
-          'total': total,
-          'available': total,
-          'status': 'free',
-          'isAvailable': true,
-          'seededBy': 'app_default',
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+        final name = (data['name'] as String?)?.trim().isNotEmpty == true
+            ? data['name'] as String
+            : 'Зогсоол';
+        final price = data['price_per_hour'] ?? data['pricePerHour'] ?? data['price'];
+        final status = _spotStatus(data);
+        final total = data['total'];
+        final avail = data['available'] ?? data['avail'] ?? data['free'];
+        final cap = (avail is num && total is num)
+            ? 'Сул: ${avail.toInt()}/${total.toInt()}'
+            : (total is num ? 'Нийт: ${total.toInt()}' : '');
+        final snippetBase = price != null ? '₮$price/цаг · $status' : status;
+        final snippet = cap.isNotEmpty ? '$snippetBase · $cap' : snippetBase;
+
+        next.add(
+          Marker(
+            width: 40,
+            height: 40,
+            point: pos,
+            child: GestureDetector(
+              onTap: () {
+                final addr = (data['address'] as String?)?.trim() ?? '';
+                setState(() {
+                  showCard = true;
+                  _selectedSpotId = id;
+                  locationName = name;
+                  cardSubtitle =
+                      addr.isNotEmpty ? '$addr · $snippet' : snippet.toString();
+                });
+              },
+              child: Icon(
+                Icons.location_pin,
+                size: 40,
+                color: status == 'free' ? Colors.green : Colors.red,
+              ),
+            ),
+          ),
+        );
       }
-
-      addDemo(
-        'demo_ub_center',
-        'Сүхбаатар талбай ойролцоо',
-        47.918873,
-        106.917701,
-        2000,
-        50,
-      );
-      addDemo(
-        'demo_ub_shangri',
-        'Шангри-La / Central tower',
-        47.9169,
-        106.9215,
-        2500,
-        40,
-      );
-      addDemo('demo_ub_ikh', 'Их дэлгүүр орчим', 47.9225, 106.9150, 1500, 60);
-      addDemo(
-        'demo_ub_bogd',
-        'Богд хаан ордон ойролцоо',
-        47.9250,
-        106.9080,
-        1800,
-        30,
-      );
-      await batch.commit();
-    } catch (e, st) {
-      debugPrint('Default parking_spots seed failed: $e\n$st');
-    } finally {
-      _defaultSpotsSeedInFlight = false;
+      setState(() {
+        _spotRows = rows;
+        _markers = next;
+        _loadingSpots = false;
+        _spotsError = null;
+      });
+    } catch (e) {
+      debugPrint('fetch spots: $e');
+      if (!mounted) return;
+      setState(() {
+        _loadingSpots = false;
+        _spotsError = e.toString();
+      });
     }
   }
 
-  void _onSpotsUpdate(QuerySnapshot<Map<String, dynamic>> snapshot) {
-    if (snapshot.docs.isEmpty) {
-      _maybeSeedDefaultSpots();
-    }
-    final next = <Marker>{};
-    for (final doc in snapshot.docs) {
-      final data = doc.data();
-      final pos = _spotLatLng(data);
-      if (pos == null) continue;
-
-      final status = _spotStatus(data);
-      final hue = status == 'free'
-          ? BitmapDescriptor.hueGreen
-          : BitmapDescriptor.hueRed;
-      final name = (data['name'] as String?)?.trim().isNotEmpty == true
-          ? data['name'] as String
-          : 'Зогсоол';
-      final price = data['pricePerHour'] ?? data['price'];
-      final snippet = price != null ? '₮$price/цаг · $status' : status;
-
-      next.add(
-        Marker(
-          markerId: MarkerId(doc.id),
-          position: pos,
-          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-          infoWindow: InfoWindow(title: name, snippet: snippet.toString()),
-          onTap: () {
-            final addr = (data['address'] as String?)?.trim() ?? '';
-            setState(() {
-              showCard = true;
-              locationName = name;
-              cardSubtitle =
-                  addr.isNotEmpty ? '$addr · $snippet' : snippet.toString();
-            });
-          },
-        ),
-      );
-    }
-    if (mounted) {
-      setState(() => _markers = next);
-    }
-  }
-
-  LatLng? _spotLatLng(Map<String, dynamic> data) {
+  ll.LatLng? _spotLatLng(Map<String, dynamic> data) {
     final lat = data['lat'];
     final lng = data['lng'];
     if (lat is num && lng is num) {
-      return LatLng(lat.toDouble(), lng.toDouble());
+      return ll.LatLng(lat.toDouble(), lng.toDouble());
     }
     final loc = data['location'];
-    if (loc is GeoPoint) {
-      return LatLng(loc.latitude, loc.longitude);
-    }
     if (loc is Map) {
       final la = loc['lat'];
       final ln = loc['lng'];
       if (la is num && ln is num) {
-        return LatLng(la.toDouble(), ln.toDouble());
+        return ll.LatLng(la.toDouble(), ln.toDouble());
       }
     }
     return null;
@@ -782,47 +763,155 @@ class _MapScreenState extends State<MapScreen> {
   String _spotStatus(Map<String, dynamic> data) {
     final s = data['status'];
     if (s is String) return s;
-    if (data['isAvailable'] == true) return 'free';
-    if (data['isAvailable'] == false) return 'occupied';
+    if (data['is_available'] == true || data['isAvailable'] == true) {
+      return 'free';
+    }
+    if (data['is_available'] == false || data['isAvailable'] == false) {
+      return 'occupied';
+    }
     return 'free';
   }
 
   @override
   void dispose() {
-    _spotsSub?.cancel();
+    _poll?.cancel();
     searchController.dispose();
     super.dispose();
   }
 
+  Widget _windowsSpotList() {
+    if (_spotRows.isEmpty) {
+      return const Center(
+        child: Text(
+          'Зогсоол алга эсвэл API холбогдохгүй байна.\n'
+          'Docker: mobile_bas2 хавтас дээр `docker compose up`',
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      itemCount: _spotRows.length,
+      itemBuilder: (context, i) {
+        final data = _spotRows[i];
+        final pos = _spotLatLng(data);
+        final name = (data['name'] as String?)?.trim().isNotEmpty == true
+            ? data['name'] as String
+            : 'Зогсоол';
+        final price =
+            data['price_per_hour'] ?? data['pricePerHour'] ?? data['price'];
+        final sub = pos != null
+            ? '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}'
+            : '—';
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: ListTile(
+            title: Text(name),
+            subtitle: Text(
+              '${price != null ? '₮$price/цаг · ' : ''}$sub',
+            ),
+            isThreeLine: true,
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!kIsWeb && Platform.isWindows) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Parking Map')),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Material(
+              color: const Color(0xFFFFF8E1),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  'Windows дээр Google Map дэмжигдэхгүй. Зогсоолын жагсаалт Docker API-аас. '
+                  'Газрын зураг: Android эсвэл `flutter run -d chrome`.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade900),
+                ),
+              ),
+            ),
+            Expanded(child: _windowsSpotList()),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text("Parking Map")),
 
       body: Stack(
         children: [
-          /// GOOGLE MAP — Firestore `parking_spots` (вэб админ + апп админ)
-          GoogleMap(
-            initialCameraPosition: const CameraPosition(target: ub, zoom: 14),
-
-            mapType: MapType.normal,
-
-            /// 🚗 Замын түгжрэл
-            trafficEnabled: true,
-
-            /// 🏢 3D барилга
-            buildingsEnabled: true,
-
-            /// 📍 Миний байршил
-            myLocationEnabled: true,
-            myLocationButtonEnabled: true,
-
-            markers: _markers,
-
-            onMapCreated: (controller) {
-              mapController = controller;
-            },
+          /// OpenStreetMap (Google API шаардлагагүй) — Docker `mobile_bas2` /parking_spots
+          FlutterMap(
+            options: const MapOptions(
+              initialCenter: ub,
+              initialZoom: 14,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.parking_managment_system',
+              ),
+              MarkerLayer(markers: _markers),
+            ],
           ),
+
+          if (_loadingSpots)
+            Positioned(
+              top: 10,
+              left: 15,
+              right: 15,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 5),
+                  ],
+                ),
+                child: const Row(
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(child: Text('Зогсоолууд ачаалж байна…')),
+                  ],
+                ),
+              ),
+            ),
+
+          if (!_loadingSpots && (_spotsError != null || _markers.isEmpty))
+            Positioned(
+              top: 10,
+              left: 15,
+              right: 15,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 5),
+                  ],
+                ),
+                child: Text(
+                  _spotsError != null
+                      ? 'Зогсоол татахад алдаа: $_spotsError\nAPI: ${apiBaseUrl()}'
+                      : 'Одоогоор зогсоол алга (эсвэл API асаагүй байна).',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+            ),
 
           /// 🔎 SEARCH BAR
           Positioned(
@@ -864,40 +953,53 @@ class _MapScreenState extends State<MapScreen> {
                     BoxShadow(color: Colors.black26, blurRadius: 10),
                   ],
                 ),
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.location_pin, color: Color.fromARGB(255, 167, 154, 153), size: 35),
-
-                    const SizedBox(width: 10),
-
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            locationName,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.location_pin,
+                          color: Color.fromARGB(255, 167, 154, 153),
+                          size: 35,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                locationName,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              Text(
+                                cardSubtitle.isNotEmpty
+                                    ? cardSubtitle
+                                    : "Ulaanbaatar - Mongolia",
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                            ],
                           ),
-                          Text(
-                            cardSubtitle.isNotEmpty
-                                ? cardSubtitle
-                                : "Ulaanbaatar - Mongolia",
-                            style: const TextStyle(color: Colors.grey),
-                          ),
-                        ],
-                      ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => setState(() => showCard = false),
+                        ),
+                      ],
                     ),
-
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        setState(() {
-                          showCard = false;
-                        });
-                      },
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _selectedSpotId == null
+                            ? null
+                            : () => _bookSelectedSpot(),
+                        child: const Text('ЗАХИАЛАХ'),
+                      ),
                     ),
                   ],
                 ),
@@ -906,6 +1008,46 @@ class _MapScreenState extends State<MapScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _bookSelectedSpot() async {
+    final spotId = _selectedSpotId;
+    if (spotId == null) return;
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Захиалга эхлүүлэх'),
+          content: Text(
+            'Та энэ зогсоолд зогсохыг эхлүүлэх үү?\n\nЗогсоол: $locationName',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Цуцлах'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Эхлүүлэх'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+
+      await BackendApi.startBooking(spotId: spotId);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Захиалга эхэллээ. Төлөх үед хугацаагаар бодож wallet-ээс хасна.')),
+      );
+      setState(() => showCard = false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Алдаа: $e')),
+      );
+    }
   }
 }
 
@@ -921,7 +1063,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
   final TextEditingController _amountController =
       TextEditingController(text: '5000');
   final TextEditingController _hoursController = TextEditingController(text: '1');
+  final TextEditingController _topupAmountController =
+      TextEditingController(text: '5000');
+  int? _walletBalance;
+  bool _walletLoading = false;
   bool _submitting = false;
+  Map<String, dynamic>? _activeBooking;
 
   int get _amountTugrik {
     final v = int.tryParse(
@@ -938,50 +1085,92 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   @override
-  void dispose() {
-    _amountController.dispose();
-    _hoursController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadWallet();
+    _loadActiveBooking();
   }
 
-  Future<void> _submitPayment() async {
+  Future<void> _loadWallet() async {
+    setState(() => _walletLoading = true);
+    try {
+      final r = await BackendApi.walletMe();
+      if (!mounted) return;
+      setState(() => _walletBalance = (r['balance'] as int?) ?? 0);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _walletBalance = null);
+    } finally {
+      if (mounted) setState(() => _walletLoading = false);
+    }
+  }
+
+  Future<void> _loadActiveBooking() async {
+    try {
+      final b = await BackendApi.activeBooking();
+      if (!mounted) return;
+      setState(() => _activeBooking = b);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _activeBooking = null);
+    }
+  }
+
+  Future<void> _payActiveBooking() async {
+    final b = _activeBooking;
+    if (b == null) return;
+    final id = b['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    setState(() => _submitting = true);
+    try {
+      final r = await BackendApi.payBooking(
+        bookingId: id,
+        method: selectedMethod,
+      );
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = (r['balance'] as int?) ?? _walletBalance;
+        _activeBooking = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Төлбөр амжилттай. ₮${r['amount']} · ${r['hours']} цаг\nҮлдэгдэл: ₮${r['balance']}',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().contains('insufficient_balance')
+          ? 'Үлдэгдэл хүрэхгүй байна.'
+          : 'Алдаа: $e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+      await _loadWallet();
+      await _loadActiveBooking();
+    }
+  }
+
+  Future<void> _topupWallet() async {
     final amount = _amountTugrik;
     if (amount < 1) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Зөв дүн (₮) оруулна уу.')),
+        const SnackBar(content: Text('Цэнэглэх дүн (₮) оруулна уу.')),
       );
       return;
     }
-
-    final hours = _hours;
-    if (hours < 1 || hours > 24) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Цаг 1–24 хооронд тоо оруулна уу.')),
-      );
-      return;
-    }
-
     setState(() => _submitting = true);
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      final userId =
-          user?.uid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
-      final admin = AdminService();
-      await admin.submitPendingPayment(
-        userId: userId,
-        userEmail: user?.email ?? '',
+      final newBalance = await BackendApi.walletTopup(
         amount: amount,
         method: selectedMethod,
-        hours: hours,
-        note: user == null
-            ? 'guest (no-auth)'
-            : (user.isAnonymous ? 'anonymous' : null),
+        note: 'mobile topup',
       );
       if (!mounted) return;
+      setState(() => _walletBalance = newBalance);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Төлбөрийн хүсэлт илгээгдлээ. Админ баталгаажуулсны дараа баталгаагдна.'),
-        ),
+        SnackBar(content: Text('Хэтэвч цэнэглэгдлээ. Үлдэгдэл: ₮$newBalance')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -990,6 +1179,168 @@ class _PaymentScreenState extends State<PaymentScreen> {
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _hoursController.dispose();
+    _topupAmountController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _showTopupDialog() async {
+    String method = selectedMethod;
+    String bank = 'khaan';
+    _topupAmountController.text = (_amountTugrik > 0 ? _amountTugrik : 5000).toString();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Хэтэвч цэнэглэх'),
+          content: StatefulBuilder(
+            builder: (ctx, setLocal) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _topupAmountController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'Цэнэглэх дүн (₮)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  RadioListTile<String>(
+                    value: 'qpay',
+                    groupValue: method,
+                    onChanged: (v) => setLocal(() => method = v ?? 'qpay'),
+                    title: const Text('QPay (QR төлбөр)'),
+                    subtitle: const Text('Банкны апп-аар QR уншуулж төлнө'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'bank',
+                    groupValue: method,
+                    onChanged: (v) => setLocal(() => method = v ?? 'bank'),
+                    title: const Text('Дансанд шилжүүлэх'),
+                    subtitle: const Text('Хаан, Голомт, Хас гэх мэт'),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: bank,
+                    decoration: const InputDecoration(
+                      labelText: 'Банк сонгох',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'khaan', child: Text('Хаан банк')),
+                      DropdownMenuItem(value: 'xac', child: Text('Хас банк')),
+                      DropdownMenuItem(value: 'golomt', child: Text('Голомт банк')),
+                      DropdownMenuItem(value: 'tdb', child: Text('Худалдаа хөгжлийн банк')),
+                      DropdownMenuItem(value: 'state', child: Text('Төрийн банк')),
+                    ],
+                    onChanged: (v) => setLocal(() => bank = v ?? 'khaan'),
+                  ),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Цуцлах'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Цэнэглэх'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok != true) return;
+
+    final amount = int.tryParse(
+          _topupAmountController.text.trim().replaceAll(RegExp(r'\s'), ''),
+        ) ??
+        0;
+    if (amount < 1) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Цэнэглэх дүн (₮) оруулна уу.')),
+      );
+      return;
+    }
+
+    setState(() {
+      selectedMethod = '$method:$bank';
+      _amountController.text = amount.toString();
+    });
+
+    await _openBankForTopup(bank: bank, channel: method);
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Төлбөр баталгаажуулах'),
+        content: const Text(
+          'Сонгосон банкны апп дээр төлбөрөө хийсэн бол “Баталгаажуулах”-ыг дарна уу.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Цуцлах'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Баталгаажуулах'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _topupWallet();
+    }
+  }
+
+  Future<void> _openBankForTopup({
+    required String bank,
+    required String channel, // 'qpay' | 'bank'
+  }) async {
+    // Dev/demo: жинхэнэ QPay invoice/deeplink үүсгэхгүй.
+    // Тиймээс банкны апп/сайт руу нээгээд, хэрэглэгч төлснөө баталгаажуулж цэнэглэнэ.
+    Uri url;
+    switch (bank) {
+      case 'khaan':
+        url = Uri.parse('https://khanbank.com/');
+        break;
+      case 'xac':
+        url = Uri.parse('https://www.xacbank.mn/');
+        break;
+      case 'golomt':
+        url = Uri.parse('https://golomtbank.com/');
+        break;
+      case 'tdb':
+        url = Uri.parse('https://www.tdbm.mn/');
+        break;
+      case 'state':
+        url = Uri.parse('https://www.statebank.mn/');
+        break;
+      default:
+        url = Uri.parse('https://www.qpay.mn/');
+        break;
+    }
+
+    final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Банкны апп нээгдсэнгүй. $channel:$bank')),
+      );
     }
   }
 
@@ -1006,11 +1357,83 @@ class _PaymentScreenState extends State<PaymentScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _Card(
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_wallet, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _walletLoading
+                        ? 'Хэтэвч ачаалж байна…'
+                        : (_walletBalance == null
+                            ? 'Хэтэвч: нэвтэрсний дараа харагдана'
+                            : 'Хэтэвчний үлдэгдэл: ₮$_walletBalance'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed:
+                      (_walletLoading || _submitting) ? null : _showTopupDialog,
+                  child: const Text(
+                    'Цэнэглэх',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: _walletLoading ? null : _loadWallet,
+                  icon: const Icon(Icons.refresh, color: Colors.white),
+                  tooltip: 'Refresh',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_activeBooking != null) ...[
+            _Card(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Идэвхтэй захиалга',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _activeBooking!['spot_name']?.toString() ?? '—',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Эхэлсэн: ${_activeBooking!['started_at']?.toString() ?? '—'}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _submitting ? null : _payActiveBooking,
+                      child: const Text('ОДОО ТӨЛӨХ (WALLET)'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          _Card(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  "Төлөх дүн (₮)",
+                  "Дүн (₮)",
                   style: TextStyle(color: AppColors.muted),
                 ),
                 const SizedBox(height: 8),
@@ -1051,174 +1474,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
           ),
           const SizedBox(height: 14),
-          const Text(
-            "Төлбөрийн арга сонгох",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800), 
-          ),
-          const SizedBox(height: 10),
-
-          _MethodCard(
-            
-            selected: selectedMethod == 'qpay',
-            title: "QPay (QR төлбөр)", 
-            subtitle: "Банкны апп ашиглан QR уншуулна уу",
-            icon: Icons.qr_code_2,
-            onTap: () => setState(() => selectedMethod = 'qpay'),
-            
-          ),
-
-          const SizedBox(height: 10),
-          _MethodCard(
-            selected: selectedMethod == 'bank',
-            title: "Дансанд шилжүүлэх",
-            subtitle: "Хаан, Голомт, Хас гэх мэт",
-            icon: Icons.account_balance,
-            onTap: () => setState(() => selectedMethod = 'bank'),
-          ),
-
-          const SizedBox(height: 20),
-          if (selectedMethod == 'qpay') _qpayWidget(),
-          if (selectedMethod == 'bank') _bankInfo(),
-
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: AppRadii.r12),
-            ),
-            onPressed: _submitting ? null : _submitPayment,
-            icon: _submitting
-                ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.check_circle_outline, color: Colors.white),
-            label: Text(
-              _submitting ? 'Илгээж байна…' : 'ТӨЛБӨРИЙН ХҮСЭЛТ ИЛГЭЭХ',
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-            ),
+          OutlinedButton.icon(
+            onPressed: _submitting ? null : _showTopupDialog,
+            icon: const Icon(Icons.add),
+            label: const Text('ХЭТЭВЧ ЦЭНЭГЛЭХ'),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _qpayWidget() {
-    return _Card(
-      child: Column(
-        children: [
-          const Text(
-            "QPay QR код уншуулна уу",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            height: 200,
-            width: 200,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF3F4F6),
-              borderRadius: AppRadii.r16,
-            ),
-            child: const Icon(
-              Icons.qr_code_2,
-              size: 160,
-              color: Colors.black54,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            "QR кодыг банкны апп-аар уншуулж төлнө үү.",
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.muted),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bankInfo() {
-    return const _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Дансны мэдээлэл",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-          SizedBox(height: 10),
-          _InfoRow(label: "Банк", value: "Хаан банк"),
-          _InfoRow(label: "Дансны дугаар", value: "5012345678"),
-          _InfoRow(label: "Дансны нэр", value: "MyParking LLC"),
-          SizedBox(height: 10),
-          Text(
-            "Гүйлгээний утга: Машины дугаар эсвэл нэрээ бичнэ үү.",
-            style: TextStyle(color: AppColors.muted),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MethodCard extends StatelessWidget {
-  final bool selected;
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _MethodCard({
-    required this.selected,
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: _Card(
-        border: Border.all(
-          color: selected ? AppColors.primary : Colors.transparent,
-          width: 2,
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              color: selected ? AppColors.primary : Colors.grey,
-              size: 30,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: AppColors.muted),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              selected ? Icons.check_circle : Icons.circle_outlined,
-              color: selected ? AppColors.primary : Colors.grey,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1256,9 +1517,8 @@ class NotificationScreen extends StatelessWidget {
 
 class _Card extends StatelessWidget {
   final Widget child;
-  final Border? border;
 
-  const _Card({required this.child, this.border});
+  const _Card({required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -1268,30 +1528,8 @@ class _Card extends StatelessWidget {
         color: AppColors.card,
         borderRadius: AppRadii.r16,
         boxShadow: AppShadows.soft,
-        border: border,
       ),
       child: child,
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: AppColors.muted)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ],
-      ),
     );
   }
 }

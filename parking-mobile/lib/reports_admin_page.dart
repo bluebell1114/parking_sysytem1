@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'admin_service.dart';
+
+import 'auth_prefs.dart';
+import 'backend_api.dart';
 
 class ReportsAdminPage extends StatefulWidget {
   const ReportsAdminPage({super.key});
@@ -10,8 +11,6 @@ class ReportsAdminPage extends StatefulWidget {
 }
 
 class _ReportsAdminPageState extends State<ReportsAdminPage> {
-  final admin = AdminService();
-
   DateTimeRange range = DateTimeRange(
     start: DateTime.now().subtract(const Duration(days: 7)),
     end: DateTime.now(),
@@ -28,30 +27,22 @@ class _ReportsAdminPageState extends State<ReportsAdminPage> {
     });
 
     try {
-      final r = await admin.salesReport(from: range.start, to: range.end);
-      if (!mounted) return;
-      setState(() => report = r);
-    } on FirebaseException catch (e) {
-      // 🔥 яг ямар алдаа вэ гэдгийг эндээс харах боломжтой болно
-      if (!mounted) return;
-
-      if (e.code == 'failed-precondition') {
-        setState(
-          () => errorText =
-              "Firestore index хэрэгтэй байна. (failed-precondition)\nFirebase Console → Firestore → Indexes дээр үүсгэнэ.",
-        );
-      } else if (e.code == 'permission-denied') {
-        setState(
-          () => errorText = "Firestore permission-denied. Rules-ээ шалгаарай.",
-        );
-      } else {
-        setState(
-          () => errorText = "Firestore алдаа: ${e.code}\n${e.message ?? ''}",
-        );
+      final token = await AuthPrefs.getToken();
+      if (token == null || token.isEmpty) {
+        throw StateError('Нэвтрэх шаардлагатай');
       }
+      final r = await BackendApi.adminSalesReport(
+        token: token,
+        from: range.start,
+        to: range.end,
+      );
+      if (!mounted) return;
+      setState(() {
+        report = r;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() => errorText = "Алдаа: $e");
+      setState(() => errorText = 'Алдаа: $e');
     } finally {
       if (!mounted) return;
       setState(() => loading = false);
@@ -95,9 +86,7 @@ class _ReportsAdminPageState extends State<ReportsAdminPage> {
             ],
           ),
           const SizedBox(height: 16),
-
           if (loading) const CircularProgressIndicator(),
-
           if (!loading && errorText != null) ...[
             Text(errorText!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 12),
@@ -106,12 +95,11 @@ class _ReportsAdminPageState extends State<ReportsAdminPage> {
               child: const Text("Дахин ачаалах"),
             ),
           ],
-
           if (!loading && errorText == null && report != null)
             Card(
               child: ListTile(
                 title: Text('Approved төлбөр: ${report!['count']} ширхэг'),
-                subtitle: Text('Нийт орлого: ₮${report!['totalAmount']}'),
+                subtitle: Text('Нийт орлого: ₮${report!['total_amount']}'),
               ),
             ),
         ],

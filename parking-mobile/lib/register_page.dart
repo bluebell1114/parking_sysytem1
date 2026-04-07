@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
+import 'api_config.dart';
+import 'backend_api.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({Key? key}) : super(key: key);
@@ -21,26 +22,24 @@ class _RegisterPageState extends State<RegisterPage> {
 
   static const int _minPasswordLength = 6;
 
-  String _authErrorMn(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'weak-password':
-        return 'Нууц үг хэтэрхий сул. Дор хаяж $_minPasswordLength тэмдэгт ашиглана уу.';
-      case 'email-already-in-use':
-        return 'Энэ имэйлээр аль хэдийн бүртгэл бий.';
-      case 'invalid-email':
-        return 'Имэйл хаяг буруу байна.';
-      case 'operation-not-allowed':
-        return 'Имэйл/нууц үгээр бүртгэл идэвхгүй байна (Firebase тохиргоо).';
-      case 'network-request-failed':
-        return 'Сүлжээний алдаа. Дахин оролдоно уу.';
-      default:
-        final m = e.message ?? '';
-        if (m.toLowerCase().contains('at least 6') ||
-            m.toLowerCase().contains('password')) {
-          return 'Нууц үг дор хаяж $_minPasswordLength тэмдэгт байх ёстой.';
-        }
-        return e.message ?? 'Бүртгэлийн алдаа (${e.code})';
+  String _apiErrorMn(Object e) {
+    if (e is BackendApiException) {
+      switch (e.message) {
+        case 'email_in_use':
+          return 'Энэ имэйлээр аль хэдийн бүртгэл бий.';
+        case 'invalid_input':
+          return 'Имэйл/нууц үг буруу (нууц дор хаяж $_minPasswordLength тэмдэгт).';
+        case 'server_error':
+          return 'Серверийн алдаа. Docker `mobile_bas2` API асаалттай эсэхийг шалгана уу.';
+        default:
+          if (e.message.contains('Failed host lookup') ||
+              e.message.contains('Connection refused')) {
+            return 'Сүлжээний алдаа. API: ${apiBaseUrl()} — docker compose асаасан уу?';
+          }
+          return e.message;
+      }
     }
+    return 'Алдаа: $e';
   }
 
   Future<void> _registerUser() async {
@@ -48,41 +47,27 @@ class _RegisterPageState extends State<RegisterPage> {
 
     setState(() => _isLoading = true);
 
-    UserCredential? cred;
     try {
-      cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      await BackendApi.register(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
+        name: _nameController.text.trim(),
       );
-
-      final uid = cred.user!.uid;
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'uid': uid,
-        'email': _emailController.text.trim(),
-        'name': _nameController.text.trim(),
-        'createdAt': FieldValue.serverTimestamp(),
-      });
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Бүртгэл амжилттай — вэб админд харагдана')),
+        const SnackBar(
+          content: Text('Бүртгэл амжилттай — Docker (mobile_bas2) серверт хадгалагдлаа'),
+        ),
       );
       Navigator.pop(context);
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_authErrorMn(e))),
-      );
     } catch (e) {
-      try {
-        await cred?.user?.delete();
-      } catch (_) {}
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Алдаа: $e')),
+        SnackBar(content: Text(_apiErrorMn(e))),
       );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

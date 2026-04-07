@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
+import 'api_config.dart';
+import 'auth_prefs.dart';
+import 'backend_api.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -45,16 +48,30 @@ class _LoginPageState extends State<LoginPage> {
       case 'wrong-password':
         return 'Нууц үг буруу байна.';
       case 'invalid-credential':
-        return 'Имэйл эсвэл нууц үг таарахгүй. Вэбийн туршилтын нууц үг Firebase-тэй адил биш байж болно — апп дээр бүртгэсэн мэдээллээрээ орно уу.';
+        return 'Имэйл эсвэл нууц үг таарахгүй. Эхлээд «Бүртгүүлэх» хийнэ үү (Docker API).';
       case 'too-many-requests':
         return 'Хэт олон оролдлого. Түр хүлээгээд дахин оролдоорой.';
       case 'network-request-failed':
         return 'Сүлжээний алдаа. Интернэтээ шалгана уу.';
       case 'operation-not-allowed':
-        return 'Имэйл/нууц үгээр нэвтрэх Firebase дээр идэвхгүй байна (Console → Authentication).';
+        return 'Имэйл/нууц үгээр нэвтрэх идэвхгүй байна.';
       default:
         return 'Нэвтрэхэд алдаа: $code';
     }
+  }
+
+  String _apiLoginError(Object e) {
+    if (e is BackendApiException) {
+      if (e.message == 'invalid_credentials') {
+        return _authErrorMn('invalid-credential');
+      }
+      if (e.message.contains('Failed host lookup') ||
+          e.message.contains('Connection refused')) {
+        return 'Сүлжээний алдаа. API: ${apiBaseUrl()} — `mobile_bas2` docker асаасан уу?';
+      }
+      return e.message;
+    }
+    return 'Алдаа: $e';
   }
 
   Future<void> _loginUser() async {
@@ -63,25 +80,33 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final res = await BackendApi.login(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
+      );
+      final token = res['token'] as String? ?? '';
+      final user = res['user'];
+      if (token.isEmpty || user is! Map) {
+        throw BackendApiException('invalid_response', 500);
+      }
+      final u = Map<String, dynamic>.from(user);
+      await AuthPrefs.saveSession(
+        token: token,
+        userId: u['id'].toString(),
+        email: u['email'].toString(),
+        name: u['name']?.toString() ?? '',
+        isAdmin: u['isAdmin'] == true,
       );
 
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/createPin');
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_authErrorMn(e.code)),
-          duration: const Duration(seconds: 5),
-        ),
-      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Алдаа: $e')),
+        SnackBar(
+          content: Text(_apiLoginError(e)),
+          duration: const Duration(seconds: 5),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);

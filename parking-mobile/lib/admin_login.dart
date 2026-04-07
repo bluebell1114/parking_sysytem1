@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'spots_admin_page.dart';
+
+import 'api_config.dart';
+import 'auth_prefs.dart';
+import 'backend_api.dart';
 import 'payments_admin_page.dart';
 import 'reports_admin_page.dart';
+import 'spots_admin_page.dart';
 
 class AdminLoginPage extends StatefulWidget {
   const AdminLoginPage({super.key});
@@ -19,6 +21,7 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
 
   bool _loading = false;
   String? _error;
+
   @override
   void dispose() {
     _email.dispose();
@@ -38,55 +41,48 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
       final email = _email.text.trim();
       final pass = _password.text.trim();
 
-      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
-        password: pass,
+      final res = await BackendApi.login(email: email, password: pass);
+      final user = res['user'];
+      if (user is! Map) {
+        setState(() => _error = "Серверийн хариу буруу байна.");
+        return;
+      }
+      final u = Map<String, dynamic>.from(user);
+      if (u['isAdmin'] != true) {
+        if (!mounted) return;
+        setState(() => _error = "Та админ биш байна! (admin@greenpark.com / admin123)");
+        return;
+      }
+
+      final token = res['token'] as String? ?? '';
+      await AuthPrefs.saveSession(
+        token: token,
+        userId: u['id'].toString(),
+        email: u['email'].toString(),
+        name: u['name']?.toString() ?? '',
+        isAdmin: true,
       );
-
-      final uid = cred.user?.uid;
-      if (uid == null) {
-        await FirebaseAuth.instance.signOut();
-        if (!mounted) return;
-        setState(() => _error = "Нэвтрэхэд алдаа гарлаа. (UID олдсонгүй)");
-        return;
-      }
-
-      // Admin эсэхийг Firestore-оос шалгана
-      final adminDoc = await FirebaseFirestore.instance
-          .collection('admins')
-          .doc(uid)
-          .get();
-
-      if (!adminDoc.exists) {
-        await FirebaseAuth.instance.signOut();
-        if (!mounted) return;
-        setState(() => _error = "Та админ биш байна!");
-        return;
-      }
 
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const AdminHome()),
       );
-    } on FirebaseAuthException catch (e) {
+    } on BackendApiException catch (e) {
       if (!mounted) return;
-      setState(() => _error = _authMessageMn(e.code));
-    } on FirebaseException catch (e) {
-      // Firestore-ийн permission-denied энд орно
-      if (!mounted) return;
-
-      if (e.code == 'permission-denied') {
+      if (e.message == 'invalid_credentials') {
+        setState(() => _error = _authMessageMn('invalid-credential'));
+      } else if (e.message.contains('Failed host lookup') ||
+          e.message.contains('Connection refused')) {
         setState(
-          () => _error =
-              "Firestore зөвшөөрөл хүрэлцэхгүй байна (permission-denied). Rules-ээ шалгана уу.",
+          () => _error = 'API холбогдохгүй байна: ${apiBaseUrl()}',
         );
       } else {
-        setState(() => _error = "Firestore алдаа: ${e.code}");
+        setState(() => _error = e.message);
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = "Алдаа гарлаа: $e");
+      setState(() => _error = "Алдаа: $e");
     } finally {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -104,7 +100,7 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
       case 'invalid-credential':
         return "Имэйл эсвэл нууц үг буруу (эсвэл бүртгэлгүй) байна.";
       case 'too-many-requests':
-        return "Хэт олон оролдлого хийлээ. Түр хүлээгээд дахин оролдоорой.";
+        return "Хэт олон оролдлого хийлээ. Түр хүлээгээд дахин алдана.";
       case 'network-request-failed':
         return "Интернет холболтоо шалгана уу.";
       default:
@@ -150,8 +146,9 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
                     ),
                     validator: (v) {
                       if ((v ?? '').isEmpty) return "Нууц үгээ оруулна уу";
-                      if ((v ?? '').length < 6)
+                      if ((v ?? '').length < 6) {
                         return "Хамгийн багадаа 6 тэмдэгт";
+                      }
                       return null;
                     },
                   ),
@@ -172,6 +169,12 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
                           : const Text("Нэвтрэх"),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Docker `mobile_bas2` — анхны админ: admin@greenpark.com / admin123',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
             ),
@@ -186,7 +189,7 @@ class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
+    await AuthPrefs.clear();
     if (!context.mounted) return;
     Navigator.pushReplacement(
       context,
