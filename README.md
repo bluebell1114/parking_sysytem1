@@ -14,17 +14,61 @@
 
 Өмнө Firebase ашиглаж байсан хэсгийг **нэг Docker API** руу нэгтгэсэн тул мобайл болон вэб **ижил өгөгдлийг** API-аас уншина.
 
-## Backend асаах (заавал)
+## Docker ашиглах (дэлгэрэнгүй)
 
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) суусан байх.
-2. Терминал:
+**Docker** нь `mobile_bas2` хавтас дахь `docker-compose.yml` файлаар хоёр **контейнер** зэрэг асаана: **PostgreSQL** (өгөгдлийн сан) болон **Node.js API** (REST сервер). Та зөвхөн Docker Desktop асаагаад доорх тушаалуудыг ажиллуулна.
+
+### Өмнө нь
+
+- Windows дээр [Docker Desktop](https://www.docker.com/products/docker-desktop/) суусан, асаасан (доод талын whale дүрс ногоон).
+- Терминал дээр төслийн **`mobile_bas2`** хавтас руу орно (жишээ: репозиторийг татаад `parking_sysytem1-main/mobile_bas2`).
+
+### Анх удаа эсвэл код өөрчлөгдсөн үед — барьж асаах
+
+`--build` нь API-ийн Docker **image**-ийг дахин угсарна. ` -d` нь дэвсгэрт асаана (терминалыг чөлөөлнө).
 
 ```bash
 cd mobile_bas2
 docker compose up --build -d
 ```
 
-3. Шалгах: хөтөчөөр `http://127.0.0.1:4000/health` — `{"ok":true}` гэж харагдана.
+### Дараа нь зөвхөн асаах (өөрчлөлтгүй бол)
+
+```bash
+cd mobile_bas2
+docker compose up -d
+```
+
+### Порт ба шалгалт
+
+| Юу | Хаяг |
+|----|------|
+| REST API | `http://127.0.0.1:4000` |
+| Эрүүл мэнд | `http://127.0.0.1:4000/health` → `{"ok":true}` |
+| PostgreSQL (гаднаас) | `localhost:5434`, хэрэглэгч `parking`, нууц `parking`, DB `parking_db` |
+
+Өгөгдөл **Docker volume** (`mobile_bas2_pgdata`) дээр хадгалагдана — контейнерыг зогсоосон ч дахин `up` хийхэд үлдэнэ. Бүрэн цэвэрлэхийг хүсвэл доорх `down -v` хэрэглэнэ.
+
+### Лог харах, зогсоох
+
+```bash
+cd mobile_bas2
+docker compose logs -f api      # API-ийн лог (Ctrl+C зогсооно)
+docker compose ps               # Ажиллаж буй контейнерууд
+docker compose stop             # Зогсоох (өгөгдөл хадгалагдана)
+docker compose down             # Контейнер устгах, сүлжээ чөлөөлөх
+docker compose down -v          # Дээр нь volume устгах = DB хоосорно (анхаар!)
+```
+
+### Алдаа гарвал
+
+- `port is already allocated` — 4000 эсвэл 5434 порт өөр програмаар эзлэгдсэн байна; тэр үйлчилгээг зогсоо эсвэл `docker-compose.yml`-д порт солино.
+- API ачаалахгүй — `docker compose logs api` үзэж, `db` эхлээд **healthy** болсны дараа `api` дэвшинэ.
+
+## Backend асаах (товч)
+
+1. Docker Desktop нээлттэй, `mobile_bas2` дотор: `docker compose up --build -d`
+2. `http://127.0.0.1:4000/health` шалгана.
 
 ## Мобайл ажиллуулах
 
