@@ -18,6 +18,45 @@
 
 **Docker** нь `mobile_bas2` хавтас дахь `docker-compose.yml` файлаар хоёр **контейнер** зэрэг асаана: **PostgreSQL** (өгөгдлийн сан) болон **Node.js API** (REST сервер). Та зөвхөн Docker Desktop асаагаад доорх тушаалуудыг ажиллуулна.
 
+### Зурагтай тайлбар
+
+Доорх зурагнууд [GitHub дээрх README](https://github.com/bluebell1114/parking_sysytem1/blob/main/README.md)-г нээхэд **автоматаар** зураг болж харагдана (Mermaid). Орчин нээлттэй болохгүй бол VS Code/Cursor-д «Mermaid» өргөтгөө суулгасан ижил файлыг нээнэ.
+
+**1) Компьютер дотор юу асааж байгаа вэ**
+
+```mermaid
+flowchart LR
+  subgraph machine["Таны компьютер"]
+    DD[Docker Desktop]
+    COM[docker compose]
+  end
+  DD --> COM
+  COM --> DB[(PostgreSQL<br/>гаднаас порт 5434)]
+  COM --> API[Node.js API<br/>порт 4000]
+  API -->|SQL| DB
+```
+
+**2) Апп, вэб, серверийн холбоо**
+
+```mermaid
+flowchart LR
+  M[Flutter апп] -->|127.0.0.1 эсвэл<br/>10.0.2.2 :4000| API[REST API]
+  W[Админ вэб] -->|:4000| API
+  API --> DB[(PostgreSQL)]
+```
+
+**3) Анхныхны дараалал**
+
+```mermaid
+flowchart TD
+  A[Docker Desktop асаах<br/>далайн усны дүрс ногоон] --> B[mobile_bas2 руу cd]
+  B --> C["docker compose up --build -d"]
+  C --> D[127.0.0.1:4000/health шалгах]
+  D --> E[Мобайл: flutter run<br/>Вэб: npx serve]
+```
+
+**Docker Desktop-ийн цонхоор шалгах:** зүүн цэснээс **Containers** — `mobile_bas2_postgres`, `mobile_bas2_api` хоёр ногоон төлөвтэй байвал зөв.
+
 ### Өмнө нь
 
 - Windows дээр [Docker Desktop](https://www.docker.com/products/docker-desktop/) суусан, асаасан (доод талын whale дүрс ногоон).
