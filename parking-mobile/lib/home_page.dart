@@ -1584,9 +1584,6 @@ class PaymentScreen extends StatefulWidget {
 
 class _PaymentScreenState extends State<PaymentScreen> {
   String selectedMethod = 'qpay';
-  final TextEditingController _amountController =
-      TextEditingController(text: '5000');
-  final TextEditingController _hoursController = TextEditingController(text: '1');
   final TextEditingController _topupAmountController =
       TextEditingController(text: '5000');
   int? _walletBalance;
@@ -1594,16 +1591,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _submitting = false;
   Map<String, dynamic>? _activeBooking;
 
-  int get _amountTugrik {
+  int get _topupAmountTugrik {
     final v = int.tryParse(
-      _amountController.text.trim().replaceAll(RegExp(r'\s'), ''),
-    );
-    return v ?? 0;
-  }
-
-  int get _hours {
-    final v = int.tryParse(
-      _hoursController.text.trim().replaceAll(RegExp(r'\s'), ''),
+      _topupAmountController.text.trim().replaceAll(RegExp(r'\s'), ''),
     );
     return v ?? 0;
   }
@@ -1677,7 +1667,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   Future<void> _topupWallet() async {
-    final amount = _amountTugrik;
+    final amount = _topupAmountTugrik;
     if (amount < 1) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Цэнэглэх дүн (₮) оруулна уу.')),
@@ -1708,8 +1698,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   void dispose() {
-    _amountController.dispose();
-    _hoursController.dispose();
     _topupAmountController.dispose();
     super.dispose();
   }
@@ -1717,7 +1705,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _showTopupDialog() async {
     String method = selectedMethod;
     String bank = 'khaan';
-    _topupAmountController.text = (_amountTugrik > 0 ? _amountTugrik : 5000).toString();
+    _topupAmountController.text =
+        (_topupAmountTugrik > 0 ? _topupAmountTugrik : 5000).toString();
 
     final ok = await showDialog<bool>(
       context: context,
@@ -1803,7 +1792,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     setState(() {
       selectedMethod = '$method:$bank';
-      _amountController.text = amount.toString();
+      _topupAmountController.text = amount.toString();
     });
 
     await _openBankForTopup(bank: bank, channel: method);
@@ -1957,57 +1946,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
             const SizedBox(height: 14),
           ],
-          _Card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Дүн (₮)",
-                  style: TextStyle(color: AppColors.muted),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _amountController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'Жишээ: 5000',
-                    prefixText: '₮ ',
-                    border: OutlineInputBorder(borderRadius: AppRadii.r12),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _hoursController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'Цаг (1–24)',
-                    suffixText: 'цаг',
-                    border: OutlineInputBorder(borderRadius: AppRadii.r12),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Нийт: ₮ ${_amountTugrik > 0 ? _amountTugrik : '—'}'
-                  '  •  ${_hours > 0 ? _hours : '—'} цаг',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: _submitting ? null : _showTopupDialog,
-            icon: const Icon(Icons.add),
-            label: const Text('ХЭТЭВЧ ЦЭНЭГЛЭХ'),
-          ),
+          // Topup is available from the header "Цэнэглэх" button.
         ],
       ),
     );
