@@ -443,7 +443,7 @@ function loadBookings() {
       let html = "";
       for (const b of rows) {
         const bid = String(b.booking_id || "");
-        const shortBid = bid.length > 10 ? bid.slice(0, 8) + "…" : bid;
+        const fullBid = bid;
         const user = b.user_email ? String(b.user_email) : "—";
         const amt = b.amount != null ? b.amount : "—";
         const hours = b.hours != null ? `${b.hours} цаг` : "";
@@ -463,8 +463,8 @@ function loadBookings() {
         const when = formatDate(b.started_at);
         html += `
       <tr>
-        <td title="${escapeHtml(bid)}">
-          <code>${escapeHtml(shortBid)}</code>
+        <td>
+          <code style="word-break:break-all">${escapeHtml(fullBid)}</code>
           <button type="button" style="margin-left:8px; padding:2px 8px;" onclick="copyText('${escapeHtml(bid)}'); event.stopPropagation();">Copy</button>
           <br><small style="opacity:.85">${escapeHtml(when)}</small>
         </td>
