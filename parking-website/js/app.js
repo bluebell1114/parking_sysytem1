@@ -318,9 +318,10 @@ function loadUsers() {
       for (const d of rows) {
         const name = d.name ?? "—";
         const email = d.email ?? "—";
+        const id = d.id ?? "";
         const when = formatDate(d.created_at);
         html += `
-      <tr>
+      <tr style="cursor:pointer" onclick="openUserDetails('${escapeHtml(String(id))}')">
         <td>${escapeHtml(String(name))}</td>
         <td>${escapeHtml(String(email))}</td>
         <td>${escapeHtml(when)}</td>
@@ -335,6 +336,87 @@ function loadUsers() {
         err.message
       )}</td></tr>`;
     });
+}
+
+function closeUserModal(ev) {
+  if (ev && ev.target && ev.target.id !== "userModal") return;
+  const m = document.getElementById("userModal");
+  if (m) m.style.display = "none";
+}
+
+async function openUserDetails(userId) {
+  const id = String(userId || "").trim();
+  if (!id) return;
+  const m = document.getElementById("userModal");
+  const body = document.getElementById("userModalBody");
+  if (!m || !body) return;
+  m.style.display = "flex";
+  body.innerHTML = "<p>Ачаалж байна…</p>";
+  try {
+    const d = await fetchJson(`/admin/users/${encodeURIComponent(id)}/details`, {
+      auth: true,
+    });
+    const user = d.user || {};
+    const cars = Array.isArray(d.cars) ? d.cars : [];
+    const active = d.activeBooking || null;
+
+    const carsHtml =
+      cars.length === 0
+        ? "<p><b>Машин:</b> бүртгэлгүй</p>"
+        : `<div><b>Машинууд:</b><ul style="margin:8px 0 0 18px;">${cars
+            .map((c) => {
+              const nm = (c.name ?? "Машин").toString();
+              const pl = (c.plate ?? "—").toString();
+              return `<li>${escapeHtml(nm)} — <code>${escapeHtml(pl)}</code></li>`;
+            })
+            .join("")}</ul></div>`;
+
+    let activeHtml = "<p><b>Одоогоор зогсож буй:</b> байхгүй</p>";
+    if (active) {
+      const spot = active.spot_name ?? "—";
+      const plate = active.car_plate ?? "—";
+      const started = formatDate(active.started_at);
+      const hours = active.hours ?? "—";
+      const amount =
+        typeof active.amount === "number" ? `₮${active.amount}` : active.amount ?? "—";
+      activeHtml = `
+        <div style="margin-top:12px;">
+          <b>Одоогоор зогсож буй:</b>
+          <div style="margin-top:8px; opacity:.95">
+            <div>Зогсоол: ${escapeHtml(String(spot))}</div>
+            <div>Машин: <code>${escapeHtml(String(plate))}</code></div>
+            <div>Эхэлсэн: ${escapeHtml(String(started))}</div>
+            <div>Хугацаа: ${escapeHtml(String(hours))} цаг</div>
+            <div>Дүн: <b>${escapeHtml(String(amount))}</b></div>
+          </div>
+        </div>`;
+    }
+
+    body.innerHTML = `
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div>
+          <b>Нэр:</b> ${escapeHtml(String(user.name ?? "—"))}<br>
+          <b>Имэйл:</b> ${escapeHtml(String(user.email ?? "—"))}<br>
+          <b>Бүртгүүлсэн:</b> ${escapeHtml(formatDate(user.created_at))}<br>
+        </div>
+        <div>
+          <b>Wallet:</b> ${escapeHtml(
+            user.wallet_balance != null ? `₮${user.wallet_balance}` : "—"
+          )}<br>
+          <b>Админ:</b> ${user.is_admin ? "Тийм" : "Үгүй"}<br>
+        </div>
+      </div>
+      <hr style="margin:14px 0; opacity:.25">
+      ${carsHtml}
+      ${activeHtml}
+      <p style="margin-top:12px; opacity:.7; font-size:12px;">
+        Нууц үг харагдахгүй (аюулгүй байдлын үүднээс).
+      </p>
+    `;
+  } catch (e) {
+    console.error(e);
+    body.innerHTML = `<p>Алдаа: ${escapeHtml(e.message || String(e))}</p>`;
+  }
 }
 
 function paymentStatusMn(status) {

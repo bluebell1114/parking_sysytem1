@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'dart:async';
 import 'package:geolocator/geolocator.dart';
@@ -52,21 +54,25 @@ class CarImage {
 }
 
 class CarModel {
+  final String? id;
   final String name;
   final String plate;
   final CarImage image;
 
   const CarModel({
+    this.id,
     required this.name,
     required this.plate,
     required this.image,
   });
 
-  CarModel copyWith({String? name, String? plate, CarImage? image}) => CarModel(
-    name: name ?? this.name,
-    plate: plate ?? this.plate,
-    image: image ?? this.image,
-  );
+  CarModel copyWith({String? id, String? name, String? plate, CarImage? image}) =>
+      CarModel(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        plate: plate ?? this.plate,
+        image: image ?? this.image,
+      );
 }
 
 class CarFormResult {
@@ -161,6 +167,44 @@ class CarListPage extends StatefulWidget {
 
 class _CarListPageState extends State<CarListPage> {
   final List<CarModel> _cars = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    setState(() => _loading = true);
+    try {
+      final rows = await BackendApi.fetchCars();
+      if (!mounted) return;
+      setState(() {
+        _cars
+          ..clear()
+          ..addAll(
+            rows.map(
+              (e) => CarModel(
+                id: e['id']?.toString(),
+                name: (e['name']?.toString() ?? '').trim().isEmpty
+                    ? 'Машин'
+                    : e['name']?.toString() ?? 'Машин',
+                plate: e['plate']?.toString() ?? '',
+                image: const CarImage(),
+              ),
+            ),
+          );
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Машин ачаалж чадсангүй: $e')),
+      );
+    }
+  }
 
   Future<void> _addCar() async {
     final CarFormResult? res = await Navigator.push(
@@ -171,7 +215,15 @@ class _CarListPageState extends State<CarListPage> {
     );
     if (res == null) return;
 
-    setState(() => _cars.add(res.toModel()));
+    try {
+      await BackendApi.createCar(name: res.name, plate: res.plate);
+      await _reload();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Нэмэхэд алдаа: $e')),
+      );
+    }
   }
 
   Future<void> _editCar(int index) async {
@@ -191,12 +243,59 @@ class _CarListPageState extends State<CarListPage> {
 
     if (res == null) return;
 
-    setState(() => _cars[index] = res.toModel());
+    final id = car.id;
+    if (id == null || id.isEmpty) return;
+
+    try {
+      await BackendApi.patchCar(id: id, name: res.name, plate: res.plate);
+      await _reload();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Засахад алдаа: $e')),
+      );
+      return;
+    }
     if (!mounted) return;
 
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text("Editing Completed!")));
+  }
+
+  Future<void> _deleteCar(int index) async {
+    final car = _cars[index];
+    final id = car.id;
+    if (id == null || id.isEmpty) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Устгах уу?'),
+        content: Text('“${car.plate}” машиныг устгах уу?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Болих'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Устгах'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await BackendApi.deleteCar(id: id);
+      await _reload();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Устгахад алдаа: $e')),
+      );
+    }
   }
 
   @override
@@ -207,10 +306,19 @@ class _CarListPageState extends State<CarListPage> {
         backgroundColor: AppColors.primary,
         title: const Text('Таны машин', style: TextStyle(color: Color.fromARGB(255, 17, 16, 16))),
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: 'Дахин ачаалах',
+            onPressed: _reload,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
-      body: _cars.isEmpty
-          ? const _EmptyCars()
-          : ListView.separated(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _cars.isEmpty
+              ? const _EmptyCars()
+              : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: _cars.length,
 
@@ -224,6 +332,7 @@ class _CarListPageState extends State<CarListPage> {
                     MaterialPageRoute(builder: (_) => CarDetailsPage(car: car)),
                   ),
                   onEdit: () => _editCar(i),
+                  onDelete: () => _deleteCar(i),
                 );
               },
             ),
@@ -279,11 +388,13 @@ class _CarCard extends StatelessWidget {
   final CarModel car;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   const _CarCard({
     required this.car,
     required this.onTap,
     required this.onEdit,
+    required this.onDelete,
   });
 
   @override
@@ -326,6 +437,10 @@ class _CarCard extends StatelessWidget {
               IconButton(
                 onPressed: onEdit,
                 icon: const Icon(Icons.edit_outlined),
+              ),
+              IconButton(
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
               ),
             ],
           ),
@@ -663,6 +778,10 @@ class _MapScreenState extends State<MapScreen> {
   String? _selectedSpotId;
 
   final TextEditingController searchController = TextEditingController();
+  final MapController _mapController = MapController();
+  bool _searching = false;
+  String? _searchError;
+  List<Map<String, dynamic>> _searchResults = [];
 
   List<Marker> _markers = [];
   List<Map<String, dynamic>> _spotRows = [];
@@ -670,11 +789,101 @@ class _MapScreenState extends State<MapScreen> {
   bool _loadingSpots = true;
   String? _spotsError;
 
+  List<Map<String, dynamic>> _cars = [];
+  String? _selectedCarId;
+
   @override
   void initState() {
     super.initState();
     _refreshSpots();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) => _refreshSpots());
+  }
+
+  Future<void> _runSearch(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _searchError = null;
+      });
+      return;
+    }
+    setState(() {
+      _searching = true;
+      _searchError = null;
+    });
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': q,
+        'format': 'json',
+        'addressdetails': '1',
+        'limit': '6',
+      });
+      final r = await http.get(
+        uri,
+        headers: const {
+          'User-Agent': 'parking_sysytem1 (flutter)',
+          'Accept': 'application/json',
+        },
+      );
+      if (r.statusCode < 200 || r.statusCode >= 300) {
+        throw Exception('Search failed (${r.statusCode})');
+      }
+      final raw = jsonDecode(r.body);
+      if (raw is! List) throw Exception('Bad search response');
+      final items = <Map<String, dynamic>>[];
+      for (final it in raw) {
+        if (it is! Map) continue;
+        final lat = double.tryParse(it['lat']?.toString() ?? '');
+        final lon = double.tryParse(it['lon']?.toString() ?? '');
+        if (lat == null || lon == null) continue;
+        items.add({
+          'display_name': it['display_name']?.toString() ?? '',
+          'lat': lat,
+          'lon': lon,
+        });
+      }
+      if (!mounted) return;
+      setState(() {
+        _searchResults = items;
+        _searching = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _searchError = e.toString();
+      });
+    }
+  }
+
+  void _goToSearchResult(Map<String, dynamic> r) {
+    final lat = r['lat'];
+    final lon = r['lon'];
+    if (lat is! double || lon is! double) return;
+    _mapController.move(ll.LatLng(lat, lon), 15);
+    setState(() => _searchResults = []);
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  Future<void> _refreshCars() async {
+    try {
+      final rows = await BackendApi.fetchCars();
+      if (!mounted) return;
+      setState(() {
+        _cars = rows;
+        if (_selectedCarId == null && rows.isNotEmpty) {
+          _selectedCarId = rows.first['id']?.toString();
+        } else if (_selectedCarId != null) {
+          final stillExists = rows.any((e) => e['id']?.toString() == _selectedCarId);
+          if (!stillExists && rows.isNotEmpty) {
+            _selectedCarId = rows.first['id']?.toString();
+          }
+        }
+      });
+    } catch (_) {
+      // ignore — we will show error on booking attempt
+    }
   }
 
   /// Docker `mobile_bas2` API — `parking_spots`.
@@ -849,6 +1058,7 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           /// OpenStreetMap (Google API шаардлагагүй) — Docker `mobile_bas2` /parking_spots
           FlutterMap(
+            mapController: _mapController,
             options: const MapOptions(
               initialCenter: ub,
               initialZoom: 14,
@@ -862,9 +1072,106 @@ class _MapScreenState extends State<MapScreen> {
             ],
           ),
 
+          // Search (Google map шиг) — OpenStreetMap Nominatim
+          Positioned(
+            top: 10,
+            left: 15,
+            right: 15,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  elevation: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.search, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: searchController,
+                            textInputAction: TextInputAction.search,
+                            decoration: const InputDecoration(
+                              hintText: 'Хаяг/газрын нэр хайх…',
+                              border: InputBorder.none,
+                              isDense: true,
+                            ),
+                            onSubmitted: _runSearch,
+                          ),
+                        ),
+                        if (_searching)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          IconButton(
+                            tooltip: 'Хайх',
+                            onPressed: () => _runSearch(searchController.text),
+                            icon: const Icon(Icons.arrow_forward, size: 20),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_searchError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Material(
+                      color: const Color(0xFFFFF8E1),
+                      borderRadius: BorderRadius.circular(10),
+                      elevation: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Text(
+                          'Search алдаа: ${_searchError!}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_searchResults.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Material(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      elevation: 4,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.zero,
+                          itemCount: _searchResults.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            final r = _searchResults[i];
+                            final name = (r['display_name']?.toString() ?? '').trim();
+                            return ListTile(
+                              dense: true,
+                              title: Text(
+                                name.isEmpty ? '—' : name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onTap: () => _goToSearchResult(r),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
           if (_loadingSpots)
             Positioned(
-              top: 10,
+              top: _searchResults.isNotEmpty || _searchError != null ? 280 : 60,
               left: 15,
               right: 15,
               child: Container(
@@ -892,7 +1199,7 @@ class _MapScreenState extends State<MapScreen> {
 
           if (!_loadingSpots && (_spotsError != null || _markers.isEmpty))
             Positioned(
-              top: 10,
+              top: _searchResults.isNotEmpty || _searchError != null ? 280 : 60,
               left: 15,
               right: 15,
               child: Container(
@@ -1014,12 +1321,66 @@ class _MapScreenState extends State<MapScreen> {
     final spotId = _selectedSpotId;
     if (spotId == null) return;
     try {
+      await _refreshCars();
+      if (_cars.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Эхлээд Car хэсгээс машин нэмнэ үү.')),
+        );
+        return;
+      }
+
+      String selectedCarId = _selectedCarId ?? _cars.first['id']?.toString() ?? '';
+      if (!_cars.any((e) => e['id']?.toString() == selectedCarId)) {
+        selectedCarId = _cars.first['id']?.toString() ?? '';
+      }
+
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Захиалга эхлүүлэх'),
-          content: Text(
-            'Та энэ зогсоолд зогсохыг эхлүүлэх үү?\n\nЗогсоол: $locationName',
+          content: StatefulBuilder(
+            builder: (dctx, setInner) {
+              final items = _cars
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .where((e) => (e['id']?.toString() ?? '').isNotEmpty)
+                  .toList();
+              final current = items.firstWhere(
+                (e) => e['id']?.toString() == selectedCarId,
+                orElse: () => items.first,
+              );
+              final plate = current['plate']?.toString() ?? '—';
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Та энэ зогсоолд зогсохыг эхлүүлэх үү?\n\nЗогсоол: $locationName'),
+                  const SizedBox(height: 12),
+                  const Text('Машин сонгох'),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: selectedCarId,
+                    items: items
+                        .map(
+                          (e) => DropdownMenuItem<String>(
+                            value: e['id']?.toString() ?? '',
+                            child: Text(
+                              '${(e['name']?.toString() ?? 'Машин').trim().isEmpty ? 'Машин' : e['name']} • ${e['plate'] ?? ''}',
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v == null || v.isEmpty) return;
+                      setInner(() => selectedCarId = v);
+                      setState(() => _selectedCarId = v);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Сонгосон: $plate'),
+                ],
+              );
+            },
           ),
           actions: [
             TextButton(
@@ -1035,7 +1396,7 @@ class _MapScreenState extends State<MapScreen> {
       );
       if (ok != true) return;
 
-      await BackendApi.startBooking(spotId: spotId);
+      await BackendApi.startBooking(spotId: spotId, carId: selectedCarId);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1413,6 +1774,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   const SizedBox(height: 4),
                   Text(
                     'Эхэлсэн: ${_activeBooking!['started_at']?.toString() ?? '—'}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Машин: ${_activeBooking!['car_plate']?.toString() ?? '—'}',
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   const SizedBox(height: 12),

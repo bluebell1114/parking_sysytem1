@@ -93,6 +93,73 @@ class BackendApi {
     return items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  // ---------- Cars ----------
+  static Future<List<Map<String, dynamic>>> fetchCars() async {
+    final token = await AuthPrefs.getToken();
+    if (token == null || token.isEmpty) {
+      throw BackendApiException('token_required', 401);
+    }
+    final r = await http.get(
+      Uri.parse('${apiBaseUrl()}/cars'),
+      headers: _jsonHeaders(token: token),
+    );
+    _throwIfBad(r);
+    final m = _decodeObj(r);
+    final items = m['items'];
+    if (items is! List) return [];
+    return items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  static Future<Map<String, dynamic>> createCar({
+    required String name,
+    required String plate,
+  }) async {
+    final token = await AuthPrefs.getToken();
+    if (token == null || token.isEmpty) {
+      throw BackendApiException('token_required', 401);
+    }
+    final r = await http.post(
+      Uri.parse('${apiBaseUrl()}/cars'),
+      headers: _jsonHeaders(token: token),
+      body: jsonEncode({'name': name, 'plate': plate}),
+    );
+    _throwIfBad(r);
+    return _decodeObj(r);
+  }
+
+  static Future<Map<String, dynamic>> patchCar({
+    required String id,
+    String? name,
+    String? plate,
+  }) async {
+    final token = await AuthPrefs.getToken();
+    if (token == null || token.isEmpty) {
+      throw BackendApiException('token_required', 401);
+    }
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (plate != null) body['plate'] = plate;
+    final r = await http.patch(
+      Uri.parse('${apiBaseUrl()}/cars/$id'),
+      headers: _jsonHeaders(token: token),
+      body: jsonEncode(body),
+    );
+    _throwIfBad(r);
+    return _decodeObj(r);
+  }
+
+  static Future<void> deleteCar({required String id}) async {
+    final token = await AuthPrefs.getToken();
+    if (token == null || token.isEmpty) {
+      throw BackendApiException('token_required', 401);
+    }
+    final r = await http.delete(
+      Uri.parse('${apiBaseUrl()}/cars/$id'),
+      headers: _jsonHeaders(token: token),
+    );
+    _throwIfBad(r);
+  }
+
   static Future<void> submitPayment({
     required int amount,
     required int hours,
@@ -136,6 +203,7 @@ class BackendApi {
 
   static Future<Map<String, dynamic>> startBooking({
     required String spotId,
+    required String carId,
   }) async {
     final token = await AuthPrefs.getToken();
     if (token == null || token.isEmpty) {
@@ -144,7 +212,7 @@ class BackendApi {
     final r = await http.post(
       Uri.parse('${apiBaseUrl()}/bookings/start'),
       headers: _jsonHeaders(token: token),
-      body: jsonEncode({'spot_id': spotId}),
+      body: jsonEncode({'spot_id': spotId, 'car_id': carId}),
     );
     _throwIfBad(r);
     return _decodeObj(r);

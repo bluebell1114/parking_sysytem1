@@ -34,6 +34,19 @@
 
 </div>
 
+<!-- User details modal -->
+<div id="userModal" class="modal" onclick="closeUserModal(event)">
+  <div class="modal-content" style="width: min(720px, 92vw);" onclick="event.stopPropagation()">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <h2 style="margin:0;">Хэрэглэгчийн дэлгэрэнгүй</h2>
+      <button type="button" onclick="closeUserModal()">Хаах</button>
+    </div>
+    <div id="userModalBody" style="margin-top:12px;">
+      <!-- filled by js -->
+    </div>
+  </div>
+</div>
+
 <script src="js/app.js"></script>
 </body>
 </html>

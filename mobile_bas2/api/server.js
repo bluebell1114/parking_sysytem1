@@ -30,6 +30,14 @@ async function migrate() {
       is_admin BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS user_cars (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT '',
+      plate TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, plate)
+    );
     CREATE TABLE IF NOT EXISTS user_locations (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -93,6 +101,8 @@ async function migrate() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       spot_id UUID NOT NULL REFERENCES parking_spots(id) ON DELETE RESTRICT,
+      car_id UUID REFERENCES user_cars(id) ON DELETE SET NULL,
+      car_plate TEXT NOT NULL DEFAULT '',
       spot_name TEXT NOT NULL,
       price_per_hour INT NOT NULL DEFAULT 0,
       started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -102,6 +112,14 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_bookings_user_active ON bookings(user_id, status, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_bookings_spot_active ON bookings(spot_id, status, started_at DESC);
   `);
+
+  // For existing DBs where bookings already exists (safe no-op for new installs).
+  await pool.query(
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS car_id UUID REFERENCES user_cars(id) ON DELETE SET NULL;`
+  );
+  await pool.query(
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS car_plate TEXT NOT NULL DEFAULT '';`
+  );
 }
 
 async function seed() {
@@ -322,6 +340,92 @@ app.post("/wallet/topup", authMiddleware(true), async (req, res) => {
   }
 });
 
+// ---------- Cars (mobile) ----------
+app.get("/cars", authMiddleware(true), async (req, res) => {
+  const q = await pool.query(
+    `SELECT id, name, plate, created_at
+     FROM user_cars
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [req.user.id]
+  );
+  res.json({ items: q.rows });
+});
+
+app.post("/cars", authMiddleware(true), async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const plateRaw = String(req.body.plate || "").trim();
+  const plate = plateRaw.replace(/\s+/g, "").toUpperCase();
+  if (!plate) return res.status(400).json({ error: "plate_required" });
+  if (plate.length > 20) return res.status(400).json({ error: "plate_too_long" });
+  try {
+    const ins = await pool.query(
+      `INSERT INTO user_cars (user_id, name, plate)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, plate, created_at`,
+      [req.user.id, name, plate]
+    );
+    res.status(201).json(ins.rows[0]);
+  } catch (e) {
+    if (String(e?.code) === "23505") {
+      return res.status(409).json({ error: "plate_exists" });
+    }
+    console.error(e);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+app.patch("/cars/:id", authMiddleware(true), async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const fields = [];
+  const vals = [];
+  let i = 1;
+
+  if (req.body.name != null) {
+    fields.push(`name = $${i++}`);
+    vals.push(String(req.body.name || "").trim());
+  }
+  if (req.body.plate != null) {
+    const plateRaw = String(req.body.plate || "").trim();
+    const plate = plateRaw.replace(/\s+/g, "").toUpperCase();
+    if (!plate) return res.status(400).json({ error: "plate_required" });
+    if (plate.length > 20) return res.status(400).json({ error: "plate_too_long" });
+    fields.push(`plate = $${i++}`);
+    vals.push(plate);
+  }
+  if (!fields.length) return res.status(400).json({ error: "no_fields" });
+
+  vals.push(req.user.id);
+  vals.push(id);
+  try {
+    const q = await pool.query(
+      `UPDATE user_cars
+       SET ${fields.join(", ")}
+       WHERE user_id = $${i++} AND id::text = $${i}
+       RETURNING id, name, plate, created_at`,
+      vals
+    );
+    if (!q.rows.length) return res.status(404).json({ error: "not_found" });
+    return res.json(q.rows[0]);
+  } catch (e) {
+    if (String(e?.code) === "23505") {
+      return res.status(409).json({ error: "plate_exists" });
+    }
+    console.error(e);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+app.delete("/cars/:id", authMiddleware(true), async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const r = await pool.query(
+    `DELETE FROM user_cars WHERE user_id = $1 AND id::text = $2`,
+    [req.user.id, id]
+  );
+  if (!r.rowCount) return res.status(404).json({ error: "not_found" });
+  res.json({ ok: true });
+});
+
 app.post("/locations", authMiddleware(true), async (req, res) => {
   const lat = Number(req.body.lat);
   const lng = Number(req.body.lng);
@@ -363,7 +467,7 @@ app.get("/spots", async (_req, res) => {
 // ---------- Bookings (mobile) ----------
 app.get("/bookings/active", authMiddleware(true), async (req, res) => {
   const q = await pool.query(
-    `SELECT b.id, b.spot_id, b.spot_name, b.price_per_hour, b.started_at, b.status
+    `SELECT b.id, b.spot_id, b.spot_name, b.price_per_hour, b.started_at, b.status, b.car_id, b.car_plate
      FROM bookings b
      WHERE b.user_id = $1 AND b.status = 'active'
      ORDER BY b.started_at DESC
@@ -376,7 +480,9 @@ app.get("/bookings/active", authMiddleware(true), async (req, res) => {
 
 app.post("/bookings/start", authMiddleware(true), async (req, res) => {
   const spotId = String(req.body.spot_id || "").trim();
+  const carId = String(req.body.car_id || "").trim();
   if (!spotId) return res.status(400).json({ error: "spot_required" });
+  if (!carId) return res.status(400).json({ error: "car_required" });
 
   const client = await pool.connect();
   try {
@@ -406,12 +512,21 @@ app.post("/bookings/start", authMiddleware(true), async (req, res) => {
       return res.status(409).json({ error: "spot_full" });
     }
 
+    const cq = await client.query(
+      `SELECT id, plate FROM user_cars WHERE user_id = $1 AND id::text = $2`,
+      [req.user.id, carId]
+    );
+    if (cq.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "car_not_found" });
+    }
+
     const s = spot.rows[0];
     const ins = await client.query(
-      `INSERT INTO bookings (user_id, spot_id, spot_name, price_per_hour)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, spot_id, spot_name, price_per_hour, started_at, status`,
-      [req.user.id, s.id, s.name, s.price_per_hour || 0]
+      `INSERT INTO bookings (user_id, spot_id, car_id, car_plate, spot_name, price_per_hour)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, spot_id, spot_name, price_per_hour, started_at, status, car_id, car_plate`,
+      [req.user.id, s.id, cq.rows[0].id, cq.rows[0].plate, s.name, s.price_per_hour || 0]
     );
 
     await client.query("COMMIT");
@@ -543,6 +658,53 @@ app.get("/admin/users", authMiddleware(true), requireAdmin, async (_req, res) =>
      ORDER BY created_at DESC`
   );
   res.json({ items: q.rows });
+});
+
+app.get("/admin/users/:id/details", authMiddleware(true), requireAdmin, async (req, res) => {
+  const userId = String(req.params.id || "").trim();
+  if (!userId) return res.status(400).json({ error: "user_required" });
+
+  const u = await pool.query(
+    `SELECT id, email, name, is_admin, created_at, wallet_balance
+     FROM users WHERE id::text = $1`,
+    [userId]
+  );
+  if (u.rows.length === 0) return res.status(404).json({ error: "not_found" });
+
+  const cars = await pool.query(
+    `SELECT id, name, plate, created_at
+     FROM user_cars
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [u.rows[0].id]
+  );
+
+  const b = await pool.query(
+    `SELECT id, spot_id, spot_name, price_per_hour, started_at, status, car_id, car_plate
+     FROM bookings
+     WHERE user_id = $1 AND status = 'active'
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    [u.rows[0].id]
+  );
+
+  let active = null;
+  if (b.rows.length) {
+    const row = b.rows[0];
+    const hours = ceilHours(row.started_at);
+    const amount = Math.max(1, Number(row.price_per_hour || 0) * hours);
+    active = {
+      ...row,
+      hours,
+      amount,
+    };
+  }
+
+  res.json({
+    user: u.rows[0],
+    cars: cars.rows,
+    activeBooking: active,
+  });
 });
 
 app.post("/admin/spots", authMiddleware(true), requireAdmin, async (req, res) => {
