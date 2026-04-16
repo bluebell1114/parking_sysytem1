@@ -435,16 +435,16 @@ function paymentStatusMn(status) {
 function loadBookings() {
   const tbody = document.getElementById("bookingTable");
   if (!tbody) return;
-  tbody.innerHTML = "<tr><td colspan='4'>Ачаалж байна…</td></tr>";
+  tbody.innerHTML = "<tr><td colspan='5'>Ачаалж байна…</td></tr>";
 
   fetchJson("/admin/bookings", { auth: true })
     .then((r) => {
       const rows = Array.isArray(r.items) ? r.items : [];
       let html = "";
       for (const b of rows) {
-        const bid = String(b.booking_id || "");
-        const fullBid = bid;
         const user = b.user_email ? String(b.user_email) : "—";
+        const car = b.car_plate ? String(b.car_plate) : "—";
+        const spot = b.spot_name ? String(b.spot_name) : "—";
         const amt = b.amount != null ? b.amount : "—";
         const hours = b.hours != null ? `${b.hours} цаг` : "";
         const method = b.payment_method ? String(b.payment_method) : "";
@@ -460,26 +460,22 @@ function loadBookings() {
               : b.status === "cancelled"
                 ? "Цуцлагдсан"
                 : String(b.status || "—");
-        const when = formatDate(b.started_at);
         html += `
       <tr>
-        <td>
-          <code style="word-break:break-all">${escapeHtml(fullBid)}</code>
-          <button type="button" style="margin-left:8px; padding:2px 8px;" onclick="copyText('${escapeHtml(bid)}'); event.stopPropagation();">Copy</button>
-          <br><small style="opacity:.85">${escapeHtml(when)}</small>
-        </td>
         <td>${escapeHtml(String(user))}</td>
+        <td><code>${escapeHtml(String(car))}</code></td>
+        <td>${escapeHtml(String(spot))}</td>
         <td>${typeof amt === "number" ? escapeHtml(dun) : dun}</td>
         <td>${escapeHtml(st)}</td>
       </tr>`;
       }
       tbody.innerHTML =
         html ||
-        "<tr><td colspan='4'>Одоогоор захиалга алга.</td></tr>";
+        "<tr><td colspan='5'>Одоогоор захиалга алга.</td></tr>";
     })
     .catch((err) => {
       console.error(err);
-      tbody.innerHTML = `<tr><td colspan='4'>Алдаа: ${escapeHtml(
+      tbody.innerHTML = `<tr><td colspan='5'>Алдаа: ${escapeHtml(
         err.message
       )}</td></tr>`;
     });
@@ -503,9 +499,9 @@ function loadTopupRequests() {
         const when = formatDate(p.created_at);
         html += `
       <tr>
-        <td><code style="word-break:break-all">${escapeHtml(id)}</code><br><small style="opacity:.85">${escapeHtml(when)}</small></td>
         <td>${escapeHtml(user)}</td>
         <td>${escapeHtml(typeof amt === "number" ? `₮${amt}${method ? " · " + method : ""}` : String(amt))}</td>
+        <td><small style="opacity:.85">${escapeHtml(when)}</small></td>
         <td>
           <button type="button" onclick="approvePayment('${escapeHtml(id)}')">Зөвшөөрөх</button>
           <button type="button" onclick="rejectPayment('${escapeHtml(id)}')" style="margin-left:8px;">Татгалзах</button>
