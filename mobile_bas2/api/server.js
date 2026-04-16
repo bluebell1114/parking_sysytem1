@@ -712,6 +712,68 @@ app.get("/admin/users/:id/details", authMiddleware(true), requireAdmin, async (r
   });
 });
 
+app.get("/admin/bookings", authMiddleware(true), requireAdmin, async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  const q = await pool.query(
+    `SELECT b.id AS booking_id,
+            b.status,
+            b.started_at,
+            b.ended_at,
+            b.spot_name,
+            b.price_per_hour,
+            b.car_plate,
+            u.email AS user_email,
+            u.name  AS user_name,
+            p.id    AS payment_id,
+            p.amount AS payment_amount,
+            p.hours  AS payment_hours,
+            p.method AS payment_method,
+            p.status AS payment_status,
+            p.created_at AS payment_created_at
+     FROM bookings b
+     JOIN users u ON u.id = b.user_id
+     LEFT JOIN LATERAL (
+       SELECT *
+       FROM payments p
+       WHERE p.note = ('booking:' || b.id::text)
+       ORDER BY p.created_at DESC
+       LIMIT 1
+     ) p ON TRUE
+     ORDER BY b.started_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+
+  const items = q.rows.map((r) => {
+    const isActive = r.status === "active";
+    const hours = isActive
+      ? ceilHours(r.started_at)
+      : Number(r.payment_hours || 0) || null;
+    const amount = isActive
+      ? Math.max(1, Number(r.price_per_hour || 0) * (hours || 1))
+      : (r.payment_amount != null ? Number(r.payment_amount) : null);
+
+    return {
+      booking_id: r.booking_id,
+      status: r.status,
+      started_at: r.started_at,
+      ended_at: r.ended_at,
+      spot_name: r.spot_name,
+      car_plate: r.car_plate || "",
+      user_email: r.user_email,
+      user_name: r.user_name || "",
+      hours,
+      amount,
+      payment_id: r.payment_id,
+      payment_method: r.payment_method,
+      payment_status: r.payment_status,
+      payment_created_at: r.payment_created_at,
+    };
+  });
+
+  res.json({ items });
+});
+
 app.post("/admin/spots", authMiddleware(true), requireAdmin, async (req, res) => {
   const lat = Number(req.body.lat);
   const lng = Number(req.body.lng);

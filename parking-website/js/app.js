@@ -437,33 +437,37 @@ function loadBookings() {
   if (!tbody) return;
   tbody.innerHTML = "<tr><td colspan='4'>Ачаалж байна…</td></tr>";
 
-  fetchJson("/admin/payments", { auth: true })
+  fetchJson("/admin/bookings", { auth: true })
     .then((r) => {
       const rows = Array.isArray(r.items) ? r.items : [];
       let html = "";
-      for (const pay of rows) {
-        const id = String(pay.id || "");
-        const shortId = id.length > 10 ? id.slice(0, 8) + "…" : id;
-        const user =
-          pay.user_email && String(pay.user_email).trim()
-            ? pay.user_email
-            : pay.user_ref ?? "—";
-        const amt = pay.amount != null ? pay.amount : "—";
-        const hours = pay.hours != null ? `${pay.hours} цаг` : "";
-        const method = pay.method ? String(pay.method) : "";
+      for (const b of rows) {
+        const bid = String(b.booking_id || "");
+        const shortBid = bid.length > 10 ? bid.slice(0, 8) + "…" : bid;
+        const user = b.user_email ? String(b.user_email) : "—";
+        const amt = b.amount != null ? b.amount : "—";
+        const hours = b.hours != null ? `${b.hours} цаг` : "";
+        const method = b.payment_method ? String(b.payment_method) : "";
         const dun =
           typeof amt === "number"
-            ? `₮${amt}${hours ? " · " + hours : ""}${
-                method ? " · " + method : ""
-              }`
+            ? `₮${amt}${hours ? " · " + hours : ""}${method ? " · " + method : ""}`
             : escapeHtml(String(amt));
-        const st = paymentStatusMn(pay.status);
-        const when = formatDate(pay.created_at);
+        const st =
+          b.status === "paid"
+            ? "Баталгаажсан"
+            : b.status === "active"
+              ? "Идэвхтэй"
+              : b.status === "cancelled"
+                ? "Цуцлагдсан"
+                : String(b.status || "—");
+        const when = formatDate(b.started_at);
         html += `
       <tr>
-        <td><code>${escapeHtml(shortId)}</code><br><small style="opacity:.85">${escapeHtml(
-          when
-        )}</small></td>
+        <td title="${escapeHtml(bid)}">
+          <code>${escapeHtml(shortBid)}</code>
+          <button type="button" style="margin-left:8px; padding:2px 8px;" onclick="copyText('${escapeHtml(bid)}'); event.stopPropagation();">Copy</button>
+          <br><small style="opacity:.85">${escapeHtml(when)}</small>
+        </td>
         <td>${escapeHtml(String(user))}</td>
         <td>${typeof amt === "number" ? escapeHtml(dun) : dun}</td>
         <td>${escapeHtml(st)}</td>
@@ -471,7 +475,7 @@ function loadBookings() {
       }
       tbody.innerHTML =
         html ||
-        "<tr><td colspan='4'>Төлбөрийн бичлэг алга. Аппаас төлбөрийн хүсэлт илгээнэ үү.</td></tr>";
+        "<tr><td colspan='4'>Одоогоор захиалга алга.</td></tr>";
     })
     .catch((err) => {
       console.error(err);
@@ -479,6 +483,21 @@ function loadBookings() {
         err.message
       )}</td></tr>`;
     });
+}
+
+function copyText(txt) {
+  const t = String(txt || "");
+  if (!t) return;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(t).catch(() => {});
+  } else {
+    const el = document.createElement("textarea");
+    el.value = t;
+    document.body.appendChild(el);
+    el.select();
+    try { document.execCommand("copy"); } catch {}
+    document.body.removeChild(el);
+  }
 }
 
 function initDashboardStats() {
