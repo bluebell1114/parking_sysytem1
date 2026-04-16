@@ -483,13 +483,19 @@ function loadBookings() {
 
 function loadTopupRequests() {
   const tbody = document.getElementById("topupTable");
+  const section = document.getElementById("topupSection");
   if (!tbody) return;
   tbody.innerHTML = "<tr><td colspan='4'>Ачаалж байна…</td></tr>";
+  if (section) section.style.display = "";
 
   fetchJson("/admin/payments/pending", { auth: true })
     .then((r) => {
       const rows = Array.isArray(r.items) ? r.items : [];
       const topups = rows.filter((p) => String(p.note || "").startsWith("topup:"));
+      if (section && topups.length === 0) {
+        section.style.display = "none";
+        return;
+      }
       let html = "";
       for (const p of topups) {
         const id = String(p.id || "");
@@ -512,6 +518,7 @@ function loadTopupRequests() {
     })
     .catch((err) => {
       console.error(err);
+      if (section) section.style.display = "";
       tbody.innerHTML = `<tr><td colspan='4'>Алдаа: ${escapeHtml(err.message)}</td></tr>`;
     });
 }
