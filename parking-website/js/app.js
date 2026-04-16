@@ -485,6 +485,67 @@ function loadBookings() {
     });
 }
 
+function loadTopupRequests() {
+  const tbody = document.getElementById("topupTable");
+  if (!tbody) return;
+  tbody.innerHTML = "<tr><td colspan='4'>Ачаалж байна…</td></tr>";
+
+  fetchJson("/admin/payments/pending", { auth: true })
+    .then((r) => {
+      const rows = Array.isArray(r.items) ? r.items : [];
+      const topups = rows.filter((p) => String(p.note || "").startsWith("topup:"));
+      let html = "";
+      for (const p of topups) {
+        const id = String(p.id || "");
+        const user = p.user_email ? String(p.user_email) : p.user_ref ?? "—";
+        const amt = p.amount != null ? p.amount : "—";
+        const method = p.method ? String(p.method) : "";
+        const when = formatDate(p.created_at);
+        html += `
+      <tr>
+        <td><code style="word-break:break-all">${escapeHtml(id)}</code><br><small style="opacity:.85">${escapeHtml(when)}</small></td>
+        <td>${escapeHtml(user)}</td>
+        <td>${escapeHtml(typeof amt === "number" ? `₮${amt}${method ? " · " + method : ""}` : String(amt))}</td>
+        <td>
+          <button type="button" onclick="approvePayment('${escapeHtml(id)}')">Зөвшөөрөх</button>
+          <button type="button" onclick="rejectPayment('${escapeHtml(id)}')" style="margin-left:8px;">Татгалзах</button>
+        </td>
+      </tr>`;
+      }
+      tbody.innerHTML = html || "<tr><td colspan='4'>Pending хүсэлт алга.</td></tr>";
+    })
+    .catch((err) => {
+      console.error(err);
+      tbody.innerHTML = `<tr><td colspan='4'>Алдаа: ${escapeHtml(err.message)}</td></tr>`;
+    });
+}
+
+async function approvePayment(id) {
+  try {
+    await fetchJson(`/admin/payments/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      auth: true,
+      body: { action: "approve" },
+    });
+    loadTopupRequests();
+  } catch (e) {
+    alert("Зөвшөөрөхөд алдаа: " + e.message);
+  }
+}
+
+async function rejectPayment(id) {
+  try {
+    await fetchJson(`/admin/payments/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      auth: true,
+      body: { action: "reject" },
+    });
+    loadTopupRequests();
+  } catch (e) {
+    alert("Татгалзахад алдаа: " + e.message);
+  }
+}
+
 function copyText(txt) {
   const t = String(txt || "");
   if (!t) return;
@@ -533,6 +594,10 @@ if (document.getElementById("usersTable")) {
 
 if (document.getElementById("bookingTable")) {
   loadBookings();
+}
+
+if (document.getElementById("topupTable")) {
+  loadTopupRequests();
 }
 
 if (

@@ -1678,15 +1678,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
     setState(() => _submitting = true);
     try {
-      final newBalance = await BackendApi.walletTopup(
+      await BackendApi.walletTopupRequest(
         amount: amount,
         method: selectedMethod,
-        note: 'mobile topup',
+        note: 'mobile',
       );
       if (!mounted) return;
-      setState(() => _walletBalance = newBalance);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Хэтэвч цэнэглэгдлээ. Үлдэгдэл: ₮$newBalance')),
+        const SnackBar(content: Text('Цэнэглэх хүсэлт илгээгдлээ. Вэб админ баталгаажуулсны дараа баланс нэмэгдэнэ.')),
       );
     } catch (e) {
       if (!mounted) return;

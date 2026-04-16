@@ -272,6 +272,27 @@ class BackendApi {
     return int.tryParse(b?.toString() ?? '') ?? 0;
   }
 
+  static Future<void> walletTopupRequest({
+    required int amount,
+    required String method,
+    String? note,
+  }) async {
+    final token = await AuthPrefs.getToken();
+    if (token == null || token.isEmpty) {
+      throw BackendApiException('token_required', 401);
+    }
+    final r = await http.post(
+      Uri.parse('${apiBaseUrl()}/wallet/topup-request'),
+      headers: _jsonHeaders(token: token),
+      body: jsonEncode({
+        'amount': amount,
+        'method': method,
+        if (note != null) 'note': note,
+      }),
+    );
+    _throwIfBad(r);
+  }
+
   static Future<List<Map<String, dynamic>>> adminPendingPayments({
     required String token,
   }) async {

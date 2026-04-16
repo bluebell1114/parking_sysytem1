@@ -340,6 +340,27 @@ app.post("/wallet/topup", authMiddleware(true), async (req, res) => {
   }
 });
 
+// Create a pending topup request that must be approved by admin (web).
+app.post("/wallet/topup-request", authMiddleware(true), async (req, res) => {
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount < 1) {
+    return res.status(400).json({ error: "invalid_amount" });
+  }
+  const method = req.body.method != null ? String(req.body.method) : null;
+  const note = req.body.note != null ? String(req.body.note) : null;
+
+  const u = await pool.query(`SELECT email FROM users WHERE id = $1`, [req.user.id]);
+  if (u.rows.length === 0) return res.status(404).json({ error: "not_found" });
+
+  const ins = await pool.query(
+    `INSERT INTO payments (user_ref, user_email, amount, hours, method, status, note, spot_id)
+     VALUES ($1, $2, $3, 0, $4, 'pending', $5, NULL)
+     RETURNING id, status, amount, method, created_at`,
+    [req.user.id, u.rows[0].email, amount, method, note ? `topup:${note}` : "topup:wallet"]
+  );
+  res.status(201).json({ ok: true, request: ins.rows[0] });
+});
+
 // ---------- Cars (mobile) ----------
 app.get("/cars", authMiddleware(true), async (req, res) => {
   const q = await pool.query(
@@ -947,6 +968,22 @@ app.patch("/admin/payments/:id", authMiddleware(true), requireAdmin, async (req,
 
     // Хэрвээ reject бол буцааж available+1 хийнэ (spot_id байгаа үед).
     const pay = r.rows[0];
+
+    // If this is a wallet topup request, approving should credit the user's wallet.
+    const isTopup = typeof pay.note === "string" && pay.note.startsWith("topup:");
+    if (status === "approved" && isTopup) {
+      // pay.user_ref is stored as TEXT; in our system it is a user UUID string
+      await client.query(
+        `UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id::text = $2`,
+        [Number(pay.amount || 0), String(pay.user_ref)]
+      );
+      await client.query(
+        `INSERT INTO wallet_transactions (user_id, kind, amount, method, note)
+         VALUES ($1::uuid, 'topup', $2, $3, $4)`,
+        [String(pay.user_ref), Number(pay.amount || 0), pay.method, pay.note]
+      );
+    }
+
     if (status === "rejected" && pay.spot_id) {
       await client.query(
         `UPDATE parking_spots
