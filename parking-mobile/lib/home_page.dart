@@ -606,13 +606,41 @@ class _CarFormPageState extends State<CarFormPage> {
                       (v == null || v.trim().isEmpty) ? "Enter car name" : null,
                 ),
                 const SizedBox(height: 12),
-                _Input(
+                TextFormField(
                   controller: _plate,
-                  label: "Улсын дугаар",
-                  icon: Icons.confirmation_number_outlined,
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? "Enter plate number"
-                      : null,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  keyboardType: TextInputType.text,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: const [
+                    _MnPlateFormatter(),
+                  ],
+                  validator: (v) {
+                    final s = (v ?? '').trim();
+                    if (s.isEmpty) return 'Улсын дугаараа оруулна уу';
+                    final ok = RegExp(r'^[А-ЯӨҮ]{2}[0-9]{4}$').hasMatch(s);
+                    if (!ok) return 'Жишээ: УБ1234 (2 үсэг + 4 тоо)';
+                    return null;
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Улсын дугаар',
+                    hintText: 'УБ1234',
+                    prefixIcon: const Icon(Icons.confirmation_number_outlined),
+                    filled: true,
+                    fillColor: const Color(0xFFF9FAFB),
+                    border: OutlineInputBorder(borderRadius: AppRadii.r12),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: AppRadii.r12,
+                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: AppRadii.r12,
+                      borderSide:
+                          const BorderSide(color: AppColors.primary, width: 1.4),
+                    ),
+                    counterText: '',
+                  ),
+                  maxLength: 6,
+                  onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
@@ -623,7 +651,9 @@ class _CarFormPageState extends State<CarFormPage> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: AppRadii.r12),
                     ),
-                    onPressed: _submit,
+                    onPressed: (_formKey.currentState?.validate() ?? false)
+                        ? _submit
+                        : null,
                     child: const Text(
                       "Save",
                       style: TextStyle(color: Colors.white, fontSize: 16),
@@ -672,6 +702,44 @@ class _Input extends StatelessWidget {
           borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
         ),
       ),
+    );
+  }
+}
+
+class _MnPlateFormatter extends TextInputFormatter {
+  const _MnPlateFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // Keep only Cyrillic letters and digits, no spaces.
+    final raw = newValue.text.replaceAll(RegExp(r'\s+'), '').toUpperCase();
+    final buf = StringBuffer();
+    final letters = <String>[];
+    final digits = <String>[];
+
+    for (final rune in raw.runes) {
+      final ch = String.fromCharCode(rune);
+      if (RegExp(r'^[0-9]$').hasMatch(ch)) {
+        if (digits.length < 4) digits.add(ch);
+        continue;
+      }
+      // Mongolian Cyrillic uppercase letters (А-Я plus Ө Ү)
+      if (RegExp(r'^[А-ЯӨҮ]$').hasMatch(ch)) {
+        if (letters.length < 2) letters.add(ch);
+      }
+    }
+
+    buf.writeAll(letters);
+    buf.writeAll(digits);
+    final text = buf.toString();
+
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+      composing: TextRange.empty,
     );
   }
 }
