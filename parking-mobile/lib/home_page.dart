@@ -1593,7 +1593,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       TextEditingController(text: '5000');
   int? _walletBalance;
   bool _walletLoading = false;
-  bool _submitting = false;
+  bool _submitting = false; // used for topup dialog + general actions
+  final Set<String> _payingBookingIds = {};
   List<Map<String, dynamic>> _activeBookings = [];
 
   int get _topupAmountTugrik {
@@ -1638,7 +1639,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _payActiveBooking(String bookingId) async {
     final id = bookingId.trim();
     if (id.isEmpty) return;
-    setState(() => _submitting = true);
+    if (_payingBookingIds.contains(id)) return;
+    setState(() => _payingBookingIds.add(id));
     try {
       final r = await BackendApi.payBooking(
         bookingId: id,
@@ -1662,7 +1664,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           : 'Алдаа: $e';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) setState(() => _payingBookingIds.remove(id));
       await _loadWallet();
       await _loadActiveBooking();
     }
@@ -1920,49 +1922,83 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  for (final b in _activeBookings) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Column(
+                  Builder(
+                    builder: (context) {
+                      final groups = <String, List<Map<String, dynamic>>>{};
+                      for (final b in _activeBookings) {
+                        final plate = (b['car_plate']?.toString() ?? '—').trim().isEmpty
+                            ? '—'
+                            : (b['car_plate']?.toString() ?? '—').trim();
+                        groups.putIfAbsent(plate, () => []).add(b);
+                      }
+
+                      final plates = groups.keys.toList()..sort();
+                      return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            b['spot_name']?.toString() ?? '—',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
+                          for (final plate in plates) ...[
+                            Text(
+                              (() {
+                                final first = groups[plate]!.first;
+                                final carName = (first['car_name']?.toString() ?? '').trim();
+                                return carName.isNotEmpty ? '$carName • $plate' : plate;
+                              })(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Машин: ${b['car_plate']?.toString() ?? '—'}',
-                            style: const TextStyle(color: Colors.white70, fontSize: 12),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Эхэлсэн: ${b['started_at']?.toString() ?? '—'}',
-                            style: const TextStyle(color: Colors.white70, fontSize: 12),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _submitting
-                                  ? null
-                                  : () => _payActiveBooking(b['id']?.toString() ?? ''),
-                              child: const Text('ОДОО ТӨЛӨХ (WALLET)'),
-                            ),
-                          ),
+                            const SizedBox(height: 8),
+                            for (final b in groups[plate]!) ...[
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.white12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      b['spot_name']?.toString() ?? '—',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Эхэлсэн: ${b['started_at']?.toString() ?? '—'}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton(
+                                        onPressed: _payingBookingIds.contains(
+                                                b['id']?.toString() ?? '')
+                                            ? null
+                                            : () => _payActiveBooking(
+                                                  b['id']?.toString() ?? '',
+                                                ),
+                                        child: const Text('ОДОО ТӨЛӨХ (WALLET)'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            const SizedBox(height: 6),
+                          ],
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
+                      );
+                    },
+                  ),
                 ],
               ),
             ),

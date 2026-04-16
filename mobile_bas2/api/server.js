@@ -494,8 +494,10 @@ app.get("/spots", async (_req, res) => {
 // ---------- Bookings (mobile) ----------
 app.get("/bookings/active", authMiddleware(true), async (req, res) => {
   const q = await pool.query(
-    `SELECT b.id, b.spot_id, b.spot_name, b.price_per_hour, b.started_at, b.status, b.car_id, b.car_plate
+    `SELECT b.id, b.spot_id, b.spot_name, b.price_per_hour, b.started_at, b.status, b.car_id, b.car_plate,
+            COALESCE(uc.name, '') AS car_name
      FROM bookings b
+     LEFT JOIN user_cars uc ON uc.id = b.car_id
      WHERE b.user_id = $1 AND b.status = 'active'
      ORDER BY b.started_at DESC
      LIMIT 50`,
