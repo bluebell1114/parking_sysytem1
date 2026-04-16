@@ -456,8 +456,13 @@ app.get("/locations", authMiddleware(true), async (req, res) => {
 
 app.get("/spots", async (_req, res) => {
   const q = await pool.query(
-    `SELECT id, name, lat, lng, address, price_per_hour, total, available, status, is_available, created_at
-     FROM parking_spots
+    `SELECT ps.id, ps.name, ps.lat, ps.lng, ps.address, ps.price_per_hour, ps.total, ps.available, ps.status, ps.is_available, ps.created_at,
+            (SELECT b.car_plate
+             FROM bookings b
+             WHERE b.spot_id = ps.id AND b.status = 'active'
+             ORDER BY b.started_at DESC
+             LIMIT 1) AS current_car_plate
+     FROM parking_spots ps
      WHERE status IS DISTINCT FROM 'deleted'
      ORDER BY created_at ASC`
   );

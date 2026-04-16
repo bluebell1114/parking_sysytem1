@@ -1066,6 +1066,7 @@ class _MapScreenState extends State<MapScreen> {
             : 'Зогсоол';
         final price = data['price_per_hour'] ?? data['pricePerHour'] ?? data['price'];
         final status = _spotStatus(data);
+        final currentCar = (data['current_car_plate'] as String?)?.trim() ?? '';
         final total = data['total'];
         final avail = data['available'] ?? data['avail'] ?? data['free'];
         final cap = (avail is num && total is num)
@@ -1073,6 +1074,9 @@ class _MapScreenState extends State<MapScreen> {
             : (total is num ? 'Нийт: ${total.toInt()}' : '');
         final snippetBase = price != null ? '₮$price/цаг · $status' : status;
         final snippet = cap.isNotEmpty ? '$snippetBase · $cap' : snippetBase;
+        final snippetWithCar = (currentCar.isNotEmpty && status != 'free')
+            ? '$snippet · Машин: $currentCar'
+            : snippet;
 
         next.add(
           Marker(
@@ -1087,7 +1091,7 @@ class _MapScreenState extends State<MapScreen> {
                   _selectedSpotId = id;
                   locationName = name;
                   cardSubtitle =
-                      addr.isNotEmpty ? '$addr · $snippet' : snippet.toString();
+                      addr.isNotEmpty ? '$addr · $snippetWithCar' : snippetWithCar.toString();
                 });
               },
               child: Icon(
