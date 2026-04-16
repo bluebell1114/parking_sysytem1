@@ -353,7 +353,9 @@ app.get("/locations", authMiddleware(true), async (req, res) => {
 app.get("/spots", async (_req, res) => {
   const q = await pool.query(
     `SELECT id, name, lat, lng, address, price_per_hour, total, available, status, is_available, created_at
-     FROM parking_spots ORDER BY created_at ASC`
+     FROM parking_spots
+     WHERE status IS DISTINCT FROM 'deleted'
+     ORDER BY created_at ASC`
   );
   res.json({ items: q.rows });
 });
@@ -597,7 +599,17 @@ app.patch("/admin/spots/:id", authMiddleware(true), requireAdmin, async (req, re
 });
 
 app.delete("/admin/spots/:id", authMiddleware(true), requireAdmin, async (req, res) => {
-  const r = await pool.query(`DELETE FROM parking_spots WHERE id = $1`, [req.params.id]);
+  // IMPORTANT: don't hard-delete because existing bookings/payments may reference spot_id
+  // (see bookings.spot_id ON DELETE RESTRICT). We "archive" the spot so it disappears
+  // from /spots and cannot be booked anymore.
+  const r = await pool.query(
+    `UPDATE parking_spots
+     SET status = 'deleted',
+         is_available = FALSE,
+         available = 0
+     WHERE id = $1 AND status IS DISTINCT FROM 'deleted'`,
+    [req.params.id]
+  );
   if (r.rowCount === 0) return res.status(404).json({ error: "not_found" });
   res.json({ ok: true });
 });

@@ -38,6 +38,7 @@ class _SpotsAdminPageState extends State<SpotsAdminPage> {
         final lng = data['lng'];
         if (id.isEmpty || lat is! num || lng is! num) continue;
         final status = (data['status'] as String?) ?? 'free';
+        final name = data['name']?.toString() ?? 'Зогсоол';
         final hue = status == 'free'
             ? BitmapDescriptor.hueGreen
             : BitmapDescriptor.hueRed;
@@ -46,8 +47,8 @@ class _SpotsAdminPageState extends State<SpotsAdminPage> {
             markerId: MarkerId(id),
             position: LatLng(lat.toDouble(), lng.toDouble()),
             icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-            infoWindow: InfoWindow(title: data['name']?.toString() ?? 'Зогсоол', snippet: status),
-            onTap: () => _toggleStatus(id, status),
+            infoWindow: InfoWindow(title: name, snippet: status),
+            onTap: () => _openSpotActions(id: id, status: status, name: name),
           ),
         );
       }
@@ -57,17 +58,105 @@ class _SpotsAdminPageState extends State<SpotsAdminPage> {
     }
   }
 
-  Future<void> _toggleStatus(String id, String status) async {
+  Future<void> _openSpotActions({
+    required String id,
+    required String status,
+    required String name,
+  }) async {
     final token = await AuthPrefs.getToken();
-    if (token == null || token.isEmpty) return;
-    final newStatus = status == 'free' ? 'occupied' : 'free';
-    try {
-      await BackendApi.adminPatchSpot(token: token, id: id, status: newStatus);
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    if (!mounted) return;
+    if (token == null || token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Admin token байхгүй байна. Нэвтэрнэ үү.')),
+      );
+      return;
     }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final nextStatus = status == 'free' ? 'occupied' : 'free';
+        final nextStatusLabel = status == 'free' ? 'Occupied болгох' : 'Free болгох';
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: Theme.of(ctx).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text('ID: $id', style: Theme.of(ctx).textTheme.bodySmall),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.swap_horiz),
+                  title: Text(nextStatusLabel),
+                  subtitle: Text('Одоогийн төлөв: $status → $nextStatus'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    try {
+                      await BackendApi.adminPatchSpot(
+                        token: token,
+                        id: id,
+                        status: nextStatus,
+                      );
+                      await _load();
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Алдаа: $e')),
+                      );
+                    }
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.delete, color: Colors.red),
+                  title: const Text('Устгах', style: TextStyle(color: Colors.red)),
+                  subtitle: const Text('Жагсаалтаас нууна (archive).'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (dctx) => AlertDialog(
+                        title: const Text('Устгах уу?'),
+                        content: Text('“$name” зогсоолыг устгах уу?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dctx).pop(false),
+                            child: const Text('Болих'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(dctx).pop(true),
+                            child: const Text('Устгах'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                    try {
+                      await BackendApi.adminDeleteSpot(token: token, id: id);
+                      await _load();
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Устгахад алдаа: $e')),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _addParking(LatLng position) async {
