@@ -318,13 +318,11 @@ function loadUsers() {
       for (const d of rows) {
         const name = d.name ?? "—";
         const email = d.email ?? "—";
-        const uid = d.id ?? "—";
         const when = formatDate(d.created_at);
         html += `
       <tr>
         <td>${escapeHtml(String(name))}</td>
         <td>${escapeHtml(String(email))}</td>
-        <td><small>${escapeHtml(String(uid))}</small></td>
         <td>${escapeHtml(when)}</td>
       </tr>`;
       }
