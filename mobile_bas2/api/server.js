@@ -457,11 +457,12 @@ app.get("/locations", authMiddleware(true), async (req, res) => {
 app.get("/spots", async (_req, res) => {
   const q = await pool.query(
     `SELECT ps.id, ps.name, ps.lat, ps.lng, ps.address, ps.price_per_hour, ps.total, ps.available, ps.status, ps.is_available, ps.created_at,
-            (SELECT b.car_plate
+            (SELECT COUNT(*)::int
              FROM bookings b
-             WHERE b.spot_id = ps.id AND b.status = 'active'
-             ORDER BY b.started_at DESC
-             LIMIT 1) AS current_car_plate
+             WHERE b.spot_id = ps.id AND b.status = 'active') AS current_active_count,
+            (SELECT COALESCE(string_agg(b.car_plate, ', ' ORDER BY b.started_at DESC), '')
+             FROM bookings b
+             WHERE b.spot_id = ps.id AND b.status = 'active') AS current_car_plates
      FROM parking_spots ps
      WHERE status IS DISTINCT FROM 'deleted'
      ORDER BY created_at ASC`
@@ -476,11 +477,10 @@ app.get("/bookings/active", authMiddleware(true), async (req, res) => {
      FROM bookings b
      WHERE b.user_id = $1 AND b.status = 'active'
      ORDER BY b.started_at DESC
-     LIMIT 1`,
+     LIMIT 50`,
     [req.user.id]
   );
-  if (q.rows.length === 0) return res.json({ active: null });
-  return res.json({ active: q.rows[0] });
+  return res.json({ items: q.rows });
 });
 
 app.post("/bookings/start", authMiddleware(true), async (req, res) => {
@@ -492,16 +492,6 @@ app.post("/bookings/start", authMiddleware(true), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-
-    // Prevent multiple active bookings per user
-    const has = await client.query(
-      `SELECT id FROM bookings WHERE user_id = $1 AND status = 'active' LIMIT 1`,
-      [req.user.id]
-    );
-    if (has.rows.length) {
-      await client.query("ROLLBACK");
-      return res.status(409).json({ error: "already_active" });
-    }
 
     // Decrement availability
     const spot = await client.query(
@@ -524,6 +514,16 @@ app.post("/bookings/start", authMiddleware(true), async (req, res) => {
     if (cq.rows.length === 0) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "car_not_found" });
+    }
+
+    // Prevent multiple active bookings per CAR (one car can't occupy 2 spots at once)
+    const hasCar = await client.query(
+      `SELECT id FROM bookings WHERE user_id = $1 AND car_id = $2 AND status = 'active' LIMIT 1`,
+      [req.user.id, cq.rows[0].id]
+    );
+    if (hasCar.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "car_already_active" });
     }
 
     const s = spot.rows[0];

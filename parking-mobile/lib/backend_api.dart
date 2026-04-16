@@ -184,7 +184,7 @@ class BackendApi {
     _throwIfBad(r);
   }
 
-  static Future<Map<String, dynamic>?> activeBooking() async {
+  static Future<List<Map<String, dynamic>>> activeBookings() async {
     final token = await AuthPrefs.getToken();
     if (token == null || token.isEmpty) {
       throw BackendApiException('token_required', 401);
@@ -195,10 +195,9 @@ class BackendApi {
     );
     _throwIfBad(r);
     final m = _decodeObj(r);
-    final a = m['active'];
-    if (a == null) return null;
-    if (a is! Map) return null;
-    return Map<String, dynamic>.from(a);
+    final items = m['items'];
+    if (items is! List) return [];
+    return items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   static Future<Map<String, dynamic>> startBooking({

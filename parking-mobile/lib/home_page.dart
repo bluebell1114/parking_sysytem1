@@ -1066,7 +1066,8 @@ class _MapScreenState extends State<MapScreen> {
             : 'Зогсоол';
         final price = data['price_per_hour'] ?? data['pricePerHour'] ?? data['price'];
         final status = _spotStatus(data);
-        final currentCar = (data['current_car_plate'] as String?)?.trim() ?? '';
+        final currentCarPlates =
+            (data['current_car_plates'] as String?)?.trim() ?? '';
         final total = data['total'];
         final avail = data['available'] ?? data['avail'] ?? data['free'];
         final cap = (avail is num && total is num)
@@ -1074,8 +1075,8 @@ class _MapScreenState extends State<MapScreen> {
             : (total is num ? 'Нийт: ${total.toInt()}' : '');
         final snippetBase = price != null ? '₮$price/цаг · $status' : status;
         final snippet = cap.isNotEmpty ? '$snippetBase · $cap' : snippetBase;
-        final snippetWithCar = (currentCar.isNotEmpty && status != 'free')
-            ? '$snippet · Машин: $currentCar'
+        final snippetWithCar = (currentCarPlates.isNotEmpty && status != 'free')
+            ? '$snippet · Машин: $currentCarPlates'
             : snippet;
 
         next.add(
@@ -1593,7 +1594,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   int? _walletBalance;
   bool _walletLoading = false;
   bool _submitting = false;
-  Map<String, dynamic>? _activeBooking;
+  List<Map<String, dynamic>> _activeBookings = [];
 
   int get _topupAmountTugrik {
     final v = int.tryParse(
@@ -1625,19 +1626,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _loadActiveBooking() async {
     try {
-      final b = await BackendApi.activeBooking();
+      final items = await BackendApi.activeBookings();
       if (!mounted) return;
-      setState(() => _activeBooking = b);
+      setState(() => _activeBookings = items);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _activeBooking = null);
+      setState(() => _activeBookings = []);
     }
   }
 
-  Future<void> _payActiveBooking() async {
-    final b = _activeBooking;
-    if (b == null) return;
-    final id = b['id']?.toString() ?? '';
+  Future<void> _payActiveBooking(String bookingId) async {
+    final id = bookingId.trim();
     if (id.isEmpty) return;
     setState(() => _submitting = true);
     try {
@@ -1648,7 +1647,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (!mounted) return;
       setState(() {
         _walletBalance = (r['balance'] as int?) ?? _walletBalance;
-        _activeBooking = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1909,42 +1907,63 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
           ),
           const SizedBox(height: 14),
-          if (_activeBooking != null) ...[
+          if (_activeBookings.isNotEmpty) ...[
             _Card(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Идэвхтэй захиалга',
-                    style: TextStyle(
+                  Text(
+                    'Идэвхтэй захиалга (${_activeBookings.length})',
+                    style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
                       fontSize: 16,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _activeBooking!['spot_name']?.toString() ?? '—',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Эхэлсэн: ${_activeBooking!['started_at']?.toString() ?? '—'}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Машин: ${_activeBooking!['car_plate']?.toString() ?? '—'}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _submitting ? null : _payActiveBooking,
-                      child: const Text('ОДОО ТӨЛӨХ (WALLET)'),
+                  const SizedBox(height: 10),
+                  for (final b in _activeBookings) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            b['spot_name']?.toString() ?? '—',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Машин: ${b['car_plate']?.toString() ?? '—'}',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Эхэлсэн: ${b['started_at']?.toString() ?? '—'}',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _submitting
+                                  ? null
+                                  : () => _payActiveBooking(b['id']?.toString() ?? ''),
+                              child: const Text('ОДОО ТӨЛӨХ (WALLET)'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                  ],
                 ],
               ),
             ),
