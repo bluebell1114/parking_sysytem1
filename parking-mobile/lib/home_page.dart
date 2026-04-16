@@ -782,6 +782,7 @@ class _MapScreenState extends State<MapScreen> {
   bool _searching = false;
   String? _searchError;
   List<Map<String, dynamic>> _searchResults = [];
+  static const String _googlePlacesKey = String.fromEnvironment('GOOGLE_PLACES_KEY');
 
   List<Marker> _markers = [];
   List<Map<String, dynamic>> _spotRows = [];
@@ -813,36 +814,9 @@ class _MapScreenState extends State<MapScreen> {
       _searchError = null;
     });
     try {
-      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': q,
-        'format': 'json',
-        'addressdetails': '1',
-        'limit': '6',
-      });
-      final r = await http.get(
-        uri,
-        headers: const {
-          'User-Agent': 'parking_sysytem1 (flutter)',
-          'Accept': 'application/json',
-        },
-      );
-      if (r.statusCode < 200 || r.statusCode >= 300) {
-        throw Exception('Search failed (${r.statusCode})');
-      }
-      final raw = jsonDecode(r.body);
-      if (raw is! List) throw Exception('Bad search response');
-      final items = <Map<String, dynamic>>[];
-      for (final it in raw) {
-        if (it is! Map) continue;
-        final lat = double.tryParse(it['lat']?.toString() ?? '');
-        final lon = double.tryParse(it['lon']?.toString() ?? '');
-        if (lat == null || lon == null) continue;
-        items.add({
-          'display_name': it['display_name']?.toString() ?? '',
-          'lat': lat,
-          'lon': lon,
-        });
-      }
+      final items = _googlePlacesKey.isNotEmpty
+          ? await _googleAutocomplete(q)
+          : await _nominatimSearch(q);
       if (!mounted) return;
       setState(() {
         _searchResults = items;
@@ -857,7 +831,128 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  Future<List<Map<String, dynamic>>> _nominatimSearch(String q) async {
+    final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+      'q': q,
+      'format': 'json',
+      'addressdetails': '1',
+      'limit': '6',
+    });
+    final r = await http.get(
+      uri,
+      headers: const {
+        'User-Agent': 'parking_sysytem1 (flutter)',
+        'Accept': 'application/json',
+      },
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('OSM search failed (${r.statusCode})');
+    }
+    final raw = jsonDecode(r.body);
+    if (raw is! List) throw Exception('Bad OSM search response');
+    final items = <Map<String, dynamic>>[];
+    for (final it in raw) {
+      if (it is! Map) continue;
+      final lat = double.tryParse(it['lat']?.toString() ?? '');
+      final lon = double.tryParse(it['lon']?.toString() ?? '');
+      if (lat == null || lon == null) continue;
+      items.add({
+        'provider': 'osm',
+        'display_name': it['display_name']?.toString() ?? '',
+        'lat': lat,
+        'lon': lon,
+      });
+    }
+    return items;
+  }
+
+  Future<List<Map<String, dynamic>>> _googleAutocomplete(String q) async {
+    final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', {
+      'input': q,
+      'key': _googlePlacesKey,
+      // bias around Ulaanbaatar
+      'location': '47.918873,106.917701',
+      'radius': '40000',
+      'language': 'mn',
+    });
+    final r = await http.get(uri, headers: const {'Accept': 'application/json'});
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Google search failed (${r.statusCode})');
+    }
+    final m = jsonDecode(r.body);
+    if (m is! Map) throw Exception('Bad Google response');
+    final status = m['status']?.toString() ?? '';
+    if (status != 'OK' && status != 'ZERO_RESULTS') {
+      final msg = m['error_message']?.toString();
+      throw Exception(msg != null && msg.isNotEmpty ? msg : 'Google status: $status');
+    }
+    final preds = m['predictions'];
+    if (preds is! List) return [];
+    final items = <Map<String, dynamic>>[];
+    for (final p in preds) {
+      if (p is! Map) continue;
+      items.add({
+        'provider': 'google',
+        'display_name': p['description']?.toString() ?? '',
+        'place_id': p['place_id']?.toString() ?? '',
+      });
+    }
+    return items;
+  }
+
+  Future<ll.LatLng?> _googlePlaceToLatLng(String placeId) async {
+    if (placeId.trim().isEmpty) return null;
+    final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
+      'place_id': placeId,
+      'fields': 'geometry/location,name,formatted_address',
+      'key': _googlePlacesKey,
+      'language': 'mn',
+    });
+    final r = await http.get(uri, headers: const {'Accept': 'application/json'});
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Google details failed (${r.statusCode})');
+    }
+    final m = jsonDecode(r.body);
+    if (m is! Map) return null;
+    final status = m['status']?.toString() ?? '';
+    if (status != 'OK') return null;
+    final result = m['result'];
+    if (result is! Map) return null;
+    final geom = result['geometry'];
+    if (geom is! Map) return null;
+    final loc = geom['location'];
+    if (loc is! Map) return null;
+    final lat = (loc['lat'] is num) ? (loc['lat'] as num).toDouble() : double.tryParse(loc['lat']?.toString() ?? '');
+    final lng = (loc['lng'] is num) ? (loc['lng'] as num).toDouble() : double.tryParse(loc['lng']?.toString() ?? '');
+    if (lat == null || lng == null) return null;
+    return ll.LatLng(lat, lng);
+  }
+
   void _goToSearchResult(Map<String, dynamic> r) {
+    final provider = r['provider']?.toString() ?? 'osm';
+    if (provider == 'google') {
+      final placeId = r['place_id']?.toString() ?? '';
+      setState(() => _searching = true);
+      _googlePlaceToLatLng(placeId)
+          .then((pos) {
+            if (!mounted) return;
+            if (pos != null) _mapController.move(pos, 15);
+            setState(() {
+              _searchResults = [];
+              _searching = false;
+            });
+            FocusManager.instance.primaryFocus?.unfocus();
+          })
+          .catchError((e) {
+            if (!mounted) return;
+            setState(() {
+              _searching = false;
+              _searchError = e.toString();
+            });
+          });
+      return;
+    }
+
     final lat = r['lat'];
     final lon = r['lon'];
     if (lat is! double || lon is! double) return;
@@ -1095,7 +1190,7 @@ class _MapScreenState extends State<MapScreen> {
                             controller: searchController,
                             textInputAction: TextInputAction.search,
                             decoration: const InputDecoration(
-                              hintText: 'Хаяг/газрын нэр хайх…',
+                              hintText: 'Хаяг/газрын нэр хайх… (Google key байвал Google, байхгүй бол OSM)',
                               border: InputBorder.none,
                               isDense: true,
                             ),
